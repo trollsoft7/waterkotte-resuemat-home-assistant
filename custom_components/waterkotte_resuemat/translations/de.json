@@ -1,0 +1,99 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Resümat CD4 verbinden",
+        "description": "Wählen Sie den USB-Seriell-Adapter der Wärmepumpe aus.",
+        "data": {
+          "port": "Serieller Anschluss"
+        }
+      }
+    },
+    "error": {
+      "invalid_port": "Geben Sie einen seriellen Gerätepfad ein."
+    },
+    "abort": {
+      "already_configured": "Dieser serielle Anschluss ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Abfrageintervall",
+        "data": {
+          "scan_interval": "Abfrageintervall (Sekunden)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "heating_disabled": {
+        "name": "Heizung abgeschaltet"
+      },
+      "hot_water_disabled": {
+        "name": "Warmwasser abgeschaltet"
+      },
+      "heating_running": {
+        "name": "Heizung läuft"
+      },
+      "hot_water_running": {
+        "name": "Warmwasser läuft"
+      }
+    },
+    "number": {
+      "heating_setpoint": {
+        "name": "Heizung Solltemperatur"
+      },
+      "hot_water_setpoint": {
+        "name": "Warmwasser Solltemperatur"
+      }
+    },
+    "sensor": {
+      "outdoor_temperature": {
+        "name": "Außentemperatur"
+      },
+      "outdoor_temperature_24h": {
+        "name": "Außentemperatur (24 h)"
+      },
+      "return_temperature_target": {
+        "name": "Rücklauf Solltemperatur"
+      },
+      "return_temperature": {
+        "name": "Rücklauftemperatur"
+      },
+      "flow_temperature": {
+        "name": "Vorlauftemperatur"
+      },
+      "hot_water_temperature": {
+        "name": "Warmwassertemperatur"
+      },
+      "source_inlet_temperature": {
+        "name": "Wärmequelle Eintrittstemperatur"
+      },
+      "source_outlet_temperature": {
+        "name": "Wärmequelle Austrittstemperatur"
+      },
+      "compressor_operating_hours": {
+        "name": "Betriebsstunden Kompressor"
+      },
+      "heating_operating_hours": {
+        "name": "Betriebsstunden Heizung"
+      },
+      "hot_water_operating_hours": {
+        "name": "Betriebsstunden Warmwasser"
+      },
+      "heating_start_temperature": {
+        "name": "Heizung Einsatztemperatur"
+      }
+    },
+    "switch": {
+      "heating_enabled": {
+        "name": "Heizung freigegeben"
+      },
+      "hot_water_enabled": {
+        "name": "Warmwasser freigegeben"
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "waterkotte_resuemat",
+  "name": "Waterkotte Resümat CD4",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/trollsoft7/waterkotte-resuemat-nodered",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "requirements": ["pyserial-asyncio==0.6.1"],
+  "version": "1.0.0"
+}

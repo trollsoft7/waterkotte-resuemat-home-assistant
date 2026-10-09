@@ -1,0 +1,99 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to a Resümat CD4",
+        "description": "Select the USB-to-serial adapter connected to the heat pump.",
+        "data": {
+          "port": "Serial port"
+        }
+      }
+    },
+    "error": {
+      "invalid_port": "Enter a serial device path."
+    },
+    "abort": {
+      "already_configured": "This serial port is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polling",
+        "data": {
+          "scan_interval": "Polling interval (seconds)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "heating_disabled": {
+        "name": "Heating disabled"
+      },
+      "hot_water_disabled": {
+        "name": "Hot water disabled"
+      },
+      "heating_running": {
+        "name": "Heating running"
+      },
+      "hot_water_running": {
+        "name": "Hot water running"
+      }
+    },
+    "number": {
+      "heating_setpoint": {
+        "name": "Heating setpoint"
+      },
+      "hot_water_setpoint": {
+        "name": "Hot water setpoint"
+      }
+    },
+    "sensor": {
+      "outdoor_temperature": {
+        "name": "Outdoor temperature"
+      },
+      "outdoor_temperature_24h": {
+        "name": "Outdoor temperature (24 h)"
+      },
+      "return_temperature_target": {
+        "name": "Return temperature target"
+      },
+      "return_temperature": {
+        "name": "Return temperature"
+      },
+      "flow_temperature": {
+        "name": "Flow temperature"
+      },
+      "hot_water_temperature": {
+        "name": "Hot water temperature"
+      },
+      "source_inlet_temperature": {
+        "name": "Heat source inlet temperature"
+      },
+      "source_outlet_temperature": {
+        "name": "Heat source outlet temperature"
+      },
+      "compressor_operating_hours": {
+        "name": "Compressor operating hours"
+      },
+      "heating_operating_hours": {
+        "name": "Heating operating hours"
+      },
+      "hot_water_operating_hours": {
+        "name": "Hot water operating hours"
+      },
+      "heating_start_temperature": {
+        "name": "Heating start temperature"
+      }
+    },
+    "switch": {
+      "heating_enabled": {
+        "name": "Heating enabled"
+      },
+      "hot_water_enabled": {
+        "name": "Hot water enabled"
+      }
+    }
+  }
+}

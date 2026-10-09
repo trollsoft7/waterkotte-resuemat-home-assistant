@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from serial.tools import list_ports
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -28,13 +27,15 @@ from .const import (
 
 def _serial_port_options() -> list[dict[str, str]]:
     """Return attached serial ports for the setup selector."""
+    from serialx import list_serial_ports
+
     return [
         {
-            "label": f"{port.description} ({port.device})",
+            "label": f"{port.product or port.description} ({port.device})",
             "value": port.device,
         }
         for port in sorted(
-            list_ports.comports(include_links=True),
+            list_serial_ports(),
             key=lambda item: item.device,
         )
     ]

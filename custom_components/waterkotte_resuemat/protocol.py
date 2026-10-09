@@ -172,9 +172,9 @@ class ResumatClient:
         """Open the serial port if needed."""
         if self._writer is not None and not self._writer.is_closing():
             return
-        import serial_asyncio
+        import serialx
 
-        self._reader, self._writer = await serial_asyncio.open_serial_connection(
+        self._reader, self._writer = await serialx.open_serial_connection(
             url=self.port,
             baudrate=BAUDRATE,
             bytesize=8,

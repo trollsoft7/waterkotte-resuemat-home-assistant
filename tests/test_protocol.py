@@ -28,6 +28,7 @@ ResumatClient = PROTOCOL.ResumatClient
 WAKEUP_COMMAND = PROTOCOL.WAKEUP_COMMAND
 MIN_READ_REQUEST_INTERVAL = PROTOCOL.MIN_READ_REQUEST_INTERVAL
 build_read_command = PROTOCOL.build_read_command
+build_write_enabled_command = PROTOCOL.build_write_enabled_command
 build_write_float_command = PROTOCOL.build_write_float_command
 crc16 = PROTOCOL.crc16
 decode_readings = PROTOCOL.decode_readings
@@ -62,6 +63,27 @@ class ProtocolTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 build_write_float_command(0x00F8, value)
 
+    def test_enable_switch_commands_match_node_red(self) -> None:
+        """Switch commands write the exact controller disable-flag bytes."""
+        self.assertEqual(
+            build_write_enabled_command(0x00F3, True),
+            bytes.fromhex("1002011300f30010035672"),
+        )
+        self.assertEqual(
+            build_write_enabled_command(0x00F3, False),
+            bytes.fromhex("1002011300f3011003d677"),
+        )
+        self.assertEqual(
+            build_write_enabled_command(0x0134, True),
+            bytes.fromhex("1002011301340010034469"),
+        )
+        self.assertEqual(
+            build_write_enabled_command(0x0134, False),
+            bytes.fromhex("100201130134011003c46c"),
+        )
+        with self.assertRaises(ValueError):
+            build_write_enabled_command(0x00F8, True)
+
     def test_wakeup_matches_reference_driver(self) -> None:
         """Wake-up bytes match the captured Node-RED payload exactly."""
         expected = (
@@ -86,12 +108,13 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(enabled_from_disabled_flag(True))
         self.assertTrue(enabled_from_disabled_flag(False))
 
-    def test_integration_only_exposes_heating_target_write(self) -> None:
-        """The only supported write changes the heating target."""
+    def test_integration_only_exposes_supported_writes(self) -> None:
+        """Only heating target and two enable flags are writable."""
         client = ResumatClient("/dev/null")
         self.assertTrue(callable(client.async_set_heating_setpoint))
+        self.assertTrue(callable(client.async_set_heating_enabled))
+        self.assertTrue(callable(client.async_set_hot_water_enabled))
         self.assertFalse(hasattr(client, "async_write_float"))
-        self.assertFalse(hasattr(client, "async_write_enabled"))
         self.assertEqual(build_read_command(0, 4)[2:4], b"\x01\x15")
 
     def test_client_reports_communication_status_changes(self) -> None:
@@ -323,6 +346,82 @@ class ReceiveTimeoutTests(unittest.TestCase):
         self.assertEqual(
             packets,
             [bytes.fromhex("1002011300f80000a84110035af9")],
+        )
+
+    def test_enable_switch_writes_require_controller_confirmation(self) -> None:
+        """Both enable switches send their command and require a success ACK."""
+        asyncio.run(self._async_test_enable_switch_writes())
+
+    async def _async_test_enable_switch_writes(self) -> None:
+        client = ResumatClient("/dev/null")
+        client._wakeup_sent = True
+        packets: list[bytes] = []
+        client._async_connect = lambda: asyncio.sleep(0)
+        client._async_send_read_request = capture_packet(packets)
+        ack = bytes.fromhex("ff100200110010036600ff")
+        client._reader = ChunkedReader([ack, ack, ack, ack])
+
+        await client.async_set_heating_enabled(True)
+        await client.async_set_heating_enabled(False)
+        await client.async_set_hot_water_enabled(True)
+        await client.async_set_hot_water_enabled(False)
+
+        self.assertEqual(
+            packets,
+            [
+                bytes.fromhex("1002011300f30010035672"),
+                bytes.fromhex("1002011300f3011003d677"),
+                bytes.fromhex("1002011301340010034469"),
+                bytes.fromhex("100201130134011003c46c"),
+            ],
+        )
+
+    def test_read_and_switch_write_cycles_do_not_overlap(self) -> None:
+        """A switch command waits until the two-block read cycle is finished."""
+        asyncio.run(self._async_test_read_and_switch_write_do_not_overlap())
+
+    async def _async_test_read_and_switch_write_do_not_overlap(self) -> None:
+        client = ResumatClient("/dev/null")
+        client._wakeup_sent = True
+        packets: list[bytes] = []
+        first_read_started = asyncio.Event()
+        finish_first_read = asyncio.Event()
+        client._async_connect = lambda: asyncio.sleep(0)
+        client._async_send_read_request = capture_packet(packets)
+
+        async def receive(length: int) -> bytes:
+            if not first_read_started.is_set():
+                first_read_started.set()
+                await finish_first_read.wait()
+            return bytes(length)
+
+        client._async_receive = receive
+        client._async_receive_write_confirmation = lambda _operation: asyncio.sleep(0)
+        original_interval = PROTOCOL.MIN_READ_REQUEST_INTERVAL
+        PROTOCOL.MIN_READ_REQUEST_INTERVAL = 0
+        try:
+            read_task = asyncio.create_task(client.async_read_data())
+            await first_read_started.wait()
+            write_task = asyncio.create_task(client.async_set_heating_enabled(False))
+            await asyncio.sleep(0)
+            self.assertEqual(
+                packets,
+                [build_read_command(0x0000, 0x00F3)],
+            )
+
+            finish_first_read.set()
+            await asyncio.gather(read_task, write_task)
+        finally:
+            finish_first_read.set()
+            PROTOCOL.MIN_READ_REQUEST_INTERVAL = original_interval
+
+        self.assertEqual(
+            packets,
+            [
+                build_read_command(0x0000, 0x00F3),
+                build_read_command(0x00F3, 0x0046),
+                bytes.fromhex("1002011300f3011003d677"),
+            ],
         )
 
     def test_write_ack_requires_valid_crc_and_success_status(self) -> None:

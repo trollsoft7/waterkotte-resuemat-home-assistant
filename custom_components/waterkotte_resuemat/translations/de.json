@@ -32,6 +32,14 @@
         "name": "Heizung Solltemperatur einstellen"
       }
     },
+    "switch": {
+      "heating_enable_control": {
+        "name": "Heizung ein/aus"
+      },
+      "hot_water_enable_control": {
+        "name": "Warmwasser ein/aus"
+      }
+    },
     "binary_sensor": {
       "heating_running": {
         "name": "Heizbetrieb",
@@ -109,7 +117,7 @@
           "connecting": "Verbindung wird hergestellt",
           "waking": "Regler wird geweckt",
           "sending_request": "Leseanfrage wird gesendet",
-          "sending_write": "Heiztemperatur wird gesendet",
+          "sending_write": "Schaltbefehl wird gesendet",
           "waiting_response": "Warte auf Antwort",
           "waiting_write_response": "Warte auf Bestätigung",
           "receiving": "Daten werden empfangen",

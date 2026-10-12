@@ -6,8 +6,8 @@
 This repository contains a native Home Assistant integration for a
 Waterkotte Resümat CD4 heat-pump controller over a USB serial adapter. It sends
 the controller wake-up and memory-read requests needed to retrieve
-measurements, and supports writing only the heating target temperature. It
-does not change other settings or operating modes.
+measurements, supports setting the heating target temperature, and provides
+explicit on/off controls for heating and hot water.
 The original Node-RED flows (`flows.json` and `flows-4.json`) are kept as
 protocol references.
 
@@ -44,8 +44,9 @@ and `0x00F3–0x0138`, with at least 30 seconds between read requests.
 ## Entities
 
 The integration creates temperature and operating-hour sensors, a slider for
-the heating target, binary sensors for heating/hot-water enablement and
-operation, and a diagnostic serial communication sensor. The diagnostic
+the heating target, switches for heating and hot-water enablement, binary
+sensors for their reported enablement and operation, and a diagnostic serial
+communication sensor. The diagnostic
 sensor reports states such as connecting, waking, sending a read or write,
 waiting for a response or confirmation, receiving, parsing, idle, and error.
 Its attributes show the selected serial port and the latest communication
@@ -61,6 +62,10 @@ controller's `0x0113` command with a little-endian float and CRC-16/BUYPASS.
 It only reports a successful write after a valid, status-zero `0x0011` ACK
 with a correct CRC. Afterward it polls the controller again so the sensor
 reflects the target actually stored by the heat pump.
+The heating and hot-water switches write the controller's disable flags at
+`0x00F3` and `0x0134` respectively (`0` enables, `1` disables). They use the
+same CRC-protected ACK and refresh behavior; the separate binary sensors
+continue to report the controller's actual state.
 
 For detailed protocol diagnostics, enable debug logging for
 `custom_components.waterkotte_resuemat` in Home Assistant's logger. The log

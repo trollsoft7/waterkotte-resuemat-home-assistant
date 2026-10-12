@@ -32,6 +32,14 @@
         "name": "Set heating target temperature"
       }
     },
+    "switch": {
+      "heating_enable_control": {
+        "name": "Heating on/off"
+      },
+      "hot_water_enable_control": {
+        "name": "Hot water on/off"
+      }
+    },
     "binary_sensor": {
       "heating_running": {
         "name": "Heating operation",

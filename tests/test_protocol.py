@@ -32,6 +32,7 @@ build_write_float_command = PROTOCOL.build_write_float_command
 crc16 = PROTOCOL.crc16
 decode_readings = PROTOCOL.decode_readings
 enabled_from_disabled_flag = PROTOCOL.enabled_from_disabled_flag
+decode_write_ack = PROTOCOL._decode_write_ack
 
 
 class ProtocolTests(unittest.TestCase):
@@ -304,7 +305,7 @@ class ReceiveTimeoutTests(unittest.TestCase):
         )
 
     def test_heating_write_requires_matching_controller_confirmation(self) -> None:
-        """Only a short reply containing the requested target confirms a write."""
+        """The controller's CRC-protected 0x0011 success ACK confirms writes."""
         asyncio.run(self._async_test_heating_write_confirmation())
 
     async def _async_test_heating_write_confirmation(self) -> None:
@@ -313,43 +314,44 @@ class ReceiveTimeoutTests(unittest.TestCase):
         packets: list[bytes] = []
         client._async_connect = lambda: asyncio.sleep(0)
         client._async_send_read_request = capture_packet(packets)
-        reply = make_write_reply(21.0, message_type=0x0015)
+        reply = bytes.fromhex("ff100200110010036600ff")
         client._reader = ChunkedReader([reply[:8], reply[8:]])
 
-        old_idle_timeout = PROTOCOL.WRITE_ACK_IDLE_TIMEOUT
-        PROTOCOL.WRITE_ACK_IDLE_TIMEOUT = 0.01
-        try:
-            confirmed = await client.async_set_heating_setpoint(21.0)
-        finally:
-            PROTOCOL.WRITE_ACK_IDLE_TIMEOUT = old_idle_timeout
+        confirmed = await client.async_set_heating_setpoint(21.0)
 
-        self.assertEqual(confirmed, 21.0)
+        self.assertIsNone(confirmed)
         self.assertEqual(
             packets,
             [bytes.fromhex("1002011300f80000a84110035af9")],
         )
 
-    def test_heating_write_rejects_a_different_confirmed_value(self) -> None:
-        """A reply with a different target is reported as a failed write."""
-        asyncio.run(self._async_test_heating_write_mismatch())
+    def test_write_ack_requires_valid_crc_and_success_status(self) -> None:
+        """Only a valid status-zero ACK is accepted as a successful write."""
+        asyncio.run(self._async_test_write_ack_status_failure())
 
-    async def _async_test_heating_write_mismatch(self) -> None:
+    async def _async_test_write_ack_status_failure(self) -> None:
+        ack = bytearray.fromhex("ff100200110010036600ff")
+        self.assertEqual(decode_write_ack(ack), 0)
+
+        invalid_crc = bytearray(ack)
+        invalid_crc[8] ^= 0x01
+        with self.assertRaisesRegex(ResumatProtocolError, "invalid CRC"):
+            decode_write_ack(invalid_crc)
+
+        rejected = bytearray.fromhex("ff10020011011003")
+        rejected.extend(crc16(bytes.fromhex("001101")).to_bytes(2, "big"))
+        rejected.append(0xFF)
+        self.assertEqual(decode_write_ack(rejected), 1)
+
         client = ResumatClient("/dev/null")
         client._wakeup_sent = True
         client._async_connect = lambda: asyncio.sleep(0)
         client._async_send_read_request = capture_packet([])
-        client._reader = ChunkedReader([make_write_reply(22.0)])
-
-        old_idle_timeout = PROTOCOL.WRITE_ACK_IDLE_TIMEOUT
-        PROTOCOL.WRITE_ACK_IDLE_TIMEOUT = 0.01
-        try:
-            with self.assertRaisesRegex(
-                ResumatProtocolError,
-                "confirmed 22 °C instead of 21 °C; reply bytes: ff10020017",
-            ):
-                await client.async_set_heating_setpoint(21.0)
-        finally:
-            PROTOCOL.WRITE_ACK_IDLE_TIMEOUT = old_idle_timeout
+        client._reader = ChunkedReader([bytes(rejected)])
+        with self.assertRaisesRegex(
+            ResumatProtocolError, "rejected.*status 0x01"
+        ):
+            await client.async_set_heating_setpoint(21.0)
 
     def test_heating_write_rejects_missing_reply(self) -> None:
         """A missing serial acknowledgement must not be reported as success."""
@@ -417,13 +419,6 @@ def make_response(message_type: int, payload: bytes) -> bytes:
     body = message_type.to_bytes(2, "big") + payload + bytes(5)
     escaped = body.replace(b"\x10", b"\x10\x10")
     return b"\xff\x10\x02" + escaped
-
-
-def make_write_reply(value: float, message_type: int = 0x0017) -> bytes:
-    """Build the short Node-RED reply with the returned target at offset 10."""
-    payload = b"\x00\x10\x00\x00\x00" + struct.pack("<f", value)
-    header = b"\xff\x10\x02" + message_type.to_bytes(2, "big")
-    return header + payload.replace(b"\x10", b"\x10\x10")
 
 
 def capture_packet(packets: list[bytes]):

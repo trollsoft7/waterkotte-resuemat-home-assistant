@@ -38,7 +38,7 @@ async def async_setup_entry(
 class ResumatHeatingSetpointNumber(
     CoordinatorEntity[ResumatCoordinator], NumberEntity
 ):
-    """Set and verify the heating target temperature."""
+    """Set the heating target and display its polled controller value."""
 
     entity_description = NumberEntityDescription(
         key="heating_setpoint_control",
@@ -72,18 +72,16 @@ class ResumatHeatingSetpointNumber(
         return float(value) if isinstance(value, (int, float)) else None
 
     async def async_set_native_value(self, value: float) -> None:
-        """Write the target and update Home Assistant only after confirmation."""
+        """Write the target, then refresh its value from controller memory."""
         try:
-            confirmed = await self.coordinator.client.async_set_heating_setpoint(
+            await self.coordinator.client.async_set_heating_setpoint(
                 value
             )
         except (OSError, TimeoutError, ResumatProtocolError) as err:
             self.coordinator.client.set_status("error", str(err))
             self.coordinator.client.close()
             raise HomeAssistantError(
-                f"Heating target was not confirmed by the controller: {err}"
+                f"Heating target write was not acknowledged by the controller: {err}"
             ) from err
 
-        updated_data = dict(self.coordinator.data)
-        updated_data["heating_setpoint"] = confirmed
-        self.coordinator.async_set_updated_data(updated_data)
+        self.hass.async_create_task(self.coordinator.async_request_refresh())

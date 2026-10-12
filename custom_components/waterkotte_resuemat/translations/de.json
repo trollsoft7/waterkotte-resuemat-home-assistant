@@ -27,6 +27,11 @@
     }
   },
   "entity": {
+    "number": {
+      "heating_setpoint_control": {
+        "name": "Heizung Solltemperatur einstellen"
+      }
+    },
     "binary_sensor": {
       "heating_running": {
         "name": "Heizbetrieb",
@@ -94,6 +99,9 @@
       "heating_start_temperature": {
         "name": "Heizung Einsatztemperatur"
       },
+      "heating_setpoint": {
+        "name": "Heizung Solltemperatur"
+      },
       "communication_status": {
         "name": "Serielle Kommunikation",
         "state": {
@@ -101,7 +109,9 @@
           "connecting": "Verbindung wird hergestellt",
           "waking": "Regler wird geweckt",
           "sending_request": "Leseanfrage wird gesendet",
+          "sending_write": "Heiztemperatur wird gesendet",
           "waiting_response": "Warte auf Antwort",
+          "waiting_write_response": "Warte auf Bestätigung",
           "receiving": "Daten werden empfangen",
           "parsing": "Daten werden ausgewertet",
           "idle": "Bereit",

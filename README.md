@@ -3,10 +3,11 @@
 
 # Waterkotte Resümat CD4
 
-This repository contains a read-only native Home Assistant integration for a
+This repository contains a native Home Assistant integration for a
 Waterkotte Resümat CD4 heat-pump controller over a USB serial adapter. It sends
-only the controller wake-up and memory-read requests needed to retrieve
-measurements; it does not write settings or operating modes to the heat pump.
+the controller wake-up and memory-read requests needed to retrieve
+measurements, and supports writing only the heating target temperature. It
+does not change other settings or operating modes.
 The original Node-RED flows (`flows.json` and `flows-4.json`) are kept as
 protocol references.
 
@@ -42,15 +43,22 @@ and `0x00F3–0x0138`, with at least 30 seconds between read requests.
 
 ## Entities
 
-The integration creates temperature and operating-hour sensors, binary sensors
-for heating/hot-water disablement and operation, and a diagnostic serial
-communication sensor. The diagnostic sensor reports states such as connecting,
-waking, sending a read request, waiting for a response, receiving, parsing,
-idle, and error. Its attributes show the selected serial port and the latest
-communication error. Setpoints are available as read-only sensors.
+The integration creates temperature and operating-hour sensors, a slider for
+the heating target, binary sensors for heating/hot-water enablement and
+operation, and a diagnostic serial communication sensor. The diagnostic
+sensor reports states such as connecting, waking, sending a read or write,
+waiting for a response or confirmation, receiving, parsing, idle, and error.
+Its attributes show the selected serial port and the latest communication
+error.
 Heating and hot-water operating states display localized active/off labels;
 their enablement sensors report active when the controller's disable flag is
 clear.
+
+The current heating target is exposed as a temperature sensor. The slider lets
+you set it from 18 °C to 30 °C in 0.5 °C steps. The integration uses the
+controller's `0x0113` command with a little-endian float and CRC-16/BUYPASS.
+It only reports a successful change after the controller's short serial reply
+contains the requested target value; missing or mismatched replies are errors.
 
 For detailed protocol diagnostics, enable debug logging for
 `custom_components.waterkotte_resuemat` in Home Assistant's logger. The log

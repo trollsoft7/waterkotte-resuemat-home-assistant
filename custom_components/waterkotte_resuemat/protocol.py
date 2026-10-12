@@ -263,6 +263,11 @@ class ResumatClient:
                 raise OSError("Serial port closed while waiting for a response")
             received.extend(chunk)
             self.set_status("receiving")
+            _LOGGER.debug(
+                "Received serial chunk (%d bytes): %s",
+                len(chunk),
+                chunk.hex(),
+            )
             for frame in self._decoder.feed(chunk):
                 _LOGGER.debug(
                     "Decoded frame type 0x%04x with %d payload bytes",
@@ -292,13 +297,14 @@ class ResumatClient:
         self, expected_length: int, received: bytearray
     ) -> str:
         """Describe partial bytes received before a response timeout."""
-        partial = self._decoder.pending_data or bytes(received)
-        preview = partial[:128].hex()
-        suffix = "..." if len(partial) > 128 else ""
+        pending = self._decoder.pending_data
+        received_preview = received[:128].hex()
+        suffix = "..." if len(received) > 128 else ""
         return (
             f"Timed out waiting for read response (expected {expected_length} "
             f"payload bytes, received {len(received)} wire bytes; "
-            f"partial frame: {preview}{suffix or 'none'})"
+            f"decoder buffer: {pending.hex() or 'empty'}; received data: "
+            f"{received_preview}{suffix or 'none'})"
         )
 
     async def _async_read_range(self, address: int, length: int) -> bytes:

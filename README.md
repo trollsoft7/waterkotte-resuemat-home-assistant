@@ -52,6 +52,8 @@ communication error. Setpoints are available as read-only sensors.
 For detailed protocol diagnostics, enable debug logging for
 `custom_components.waterkotte_resuemat` in Home Assistant's logger. The log
 includes communication-state changes and transmitted/received serial bytes.
+If a response times out before a valid frame is decoded, the error includes
+the decoder's remaining bytes and a preview of the received data.
 
 ## Notes
 

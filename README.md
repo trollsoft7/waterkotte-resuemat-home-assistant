@@ -54,6 +54,8 @@ For detailed protocol diagnostics, enable debug logging for
 includes communication-state changes and transmitted/received serial bytes.
 If a response times out before a valid frame is decoded, the error includes
 the decoder's remaining bytes and a preview of the received data.
+Controller responses use the `FF 10 02` start marker (distinct from the
+read-request framing).
 
 ## Notes
 

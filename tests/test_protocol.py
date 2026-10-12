@@ -132,11 +132,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(readings["hot_water_running"])
 
 
-class ReceiveTimeoutTests(unittest.IsolatedAsyncioTestCase):
+class ReceiveTimeoutTests(unittest.TestCase):
     """Verify diagnostic details when the controller response is incomplete."""
 
-    async def test_timeout_includes_received_byte_count_and_frame(self) -> None:
+    def test_timeout_includes_received_byte_count_and_frame(self) -> None:
         """A response timeout reports the bytes received so far."""
+        asyncio.run(self._async_test_timeout_includes_received_byte_count())
+
+    async def _async_test_timeout_includes_received_byte_count(self) -> None:
         class PartialReader:
             """Return a partial frame and then wait for more input."""
 

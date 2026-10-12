@@ -28,6 +28,8 @@ MIN_READ_REQUEST_INTERVAL: Final = 30
 RESPONSE_TIMEOUT: Final = 10
 READ_RESPONSE: Final = 0x0017
 _START: Final = b"\xff\x10\x02"
+_RESPONSE_HEADER: Final = _START + READ_RESPONSE.to_bytes(2, "big")
+_RESPONSE_OVERHEAD: Final = 10
 _READ_MARKER: Final = b"\x10\x03"
 _MAX_BUFFER: Final = 8192
 _LOGGER = logging.getLogger(__name__)
@@ -84,7 +86,7 @@ def build_read_command(address: int, length: int) -> bytes:
 
 
 class FrameDecoder:
-    """Decode and checksum response frames from a serial byte stream."""
+    """Decode Node-RED response packets from a serial byte stream."""
 
     def __init__(self) -> None:
         """Initialize the stream buffer."""
@@ -95,65 +97,50 @@ class FrameDecoder:
         """Return buffered bytes that have not formed a complete frame."""
         return bytes(self._buffer)
 
-    def feed(self, data: bytes) -> list[Frame]:
-        """Append bytes and return all complete frames."""
+    def feed(self, data: bytes, expected_length: int) -> list[Frame]:
+        """Return complete replies using the expected length and DLE unescaping."""
         self._buffer.extend(data)
         if len(self._buffer) > _MAX_BUFFER:
-            del self._buffer[:-len(_START)]
+            del self._buffer[:-len(_RESPONSE_HEADER)]
             raise ResumatProtocolError("Serial response exceeded the frame buffer")
 
         frames: list[Frame] = []
+        expected_frame_length = expected_length + _RESPONSE_OVERHEAD
         while True:
-            start = self._buffer.find(_START)
+            start = self._buffer.find(_RESPONSE_HEADER)
             if start < 0:
-                keep = len(_START) - 1
+                keep = len(_RESPONSE_HEADER) - 1
                 if len(self._buffer) > keep:
                     del self._buffer[:-keep]
                 break
             if start:
                 del self._buffer[:start]
 
-            body = bytearray()
-            index = len(_START)
-            complete = False
-            while index < len(self._buffer):
+            response = bytearray(_RESPONSE_HEADER)
+            index = len(_RESPONSE_HEADER)
+            while (
+                index < len(self._buffer)
+                and len(response) < expected_frame_length
+            ):
                 byte = self._buffer[index]
-                if byte != 0x10:
-                    body.append(byte)
-                    index += 1
-                    continue
-                if index + 1 >= len(self._buffer):
-                    break
-                following = self._buffer[index + 1]
-                if following == 0x10:
-                    body.append(0x10)
-                    index += 2
-                    continue
-                if following == 0x03:
-                    if len(self._buffer) < index + 5:
+                if byte == 0x10:
+                    if index + 1 >= len(self._buffer):
                         break
-                    checksum = int.from_bytes(
-                        self._buffer[index + 2 : index + 4], "big"
-                    )
-                    if self._buffer[index + 4] != 0x16:
-                        del self._buffer[0]
-                        complete = True
-                        break
-                    del self._buffer[: index + 5]
-                    complete = True
-                    if len(body) < 2:
-                        raise ResumatProtocolError("Response frame has no message type")
-                    if crc16(body) != checksum:
-                        raise ResumatProtocolError("Response frame has an invalid CRC")
-                    frames.append(
-                        Frame(int.from_bytes(body[:2], "big"), bytes(body[2:]))
-                    )
-                    break
-                body.append(byte)
+                    if self._buffer[index + 1] == 0x10:
+                        response.append(byte)
+                        index += 2
+                        continue
+                response.append(byte)
                 index += 1
 
-            if not complete:
+            if len(response) < expected_frame_length:
                 break
+
+            payload = response[
+                len(_RESPONSE_HEADER) : len(_RESPONSE_HEADER) + expected_length
+            ]
+            frames.append(Frame(READ_RESPONSE, bytes(payload)))
+            del self._buffer[:index]
 
         return frames
 
@@ -268,7 +255,7 @@ class ResumatClient:
                 len(chunk),
                 chunk.hex(),
             )
-            for frame in self._decoder.feed(chunk):
+            for frame in self._decoder.feed(chunk, expected_length):
                 _LOGGER.debug(
                     "Decoded frame type 0x%04x with %d payload bytes",
                     frame.message_type,

@@ -99,7 +99,7 @@ class ProtocolTests(unittest.TestCase):
         ])
 
     def test_decoder_handles_split_escaped_frames(self) -> None:
-        """The stream decoder waits for split frames and unescapes DLE bytes."""
+        """The decoder accepts controller response frames and unescapes DLEs."""
         response = make_response(0x0017, b"first\x10second")
         decoder = FrameDecoder()
         self.assertEqual(decoder.feed(response[:7]), [])
@@ -108,11 +108,22 @@ class ProtocolTests(unittest.TestCase):
             [PROTOCOL.Frame(0x0017, b"first\x10second")],
         )
 
+    def test_response_start_matches_node_red_wire_frame(self) -> None:
+        """Controller replies start FF 10 02, not the command start marker."""
+        payload = bytes(range(243))
+        response = make_response(PROTOCOL.READ_RESPONSE, payload)
+
+        self.assertEqual(response[:3], b"\xff\x10\x02")
+        self.assertEqual(len(response), 254)
+        self.assertEqual(FrameDecoder().feed(response), [
+            PROTOCOL.Frame(PROTOCOL.READ_RESPONSE, payload)
+        ])
+
     def test_decoder_exposes_incomplete_frame_bytes(self) -> None:
         """Partial response data remains available for timeout diagnostics."""
         decoder = FrameDecoder()
-        self.assertEqual(decoder.feed(b"\x16\x10"), [])
-        self.assertEqual(decoder.pending_data, b"\x16\x10")
+        self.assertEqual(decoder.feed(b"\xff\x10"), [])
+        self.assertEqual(decoder.pending_data, b"\xff\x10")
 
     def test_decoder_validates_crc(self) -> None:
         """A complete response with an invalid checksum is rejected."""
@@ -288,7 +299,7 @@ def make_response(message_type: int, payload: bytes) -> bytes:
     body = message_type.to_bytes(2, "big") + payload
     escaped = body.replace(b"\x10", b"\x10\x10")
     return (
-        b"\x16\x10\x02"
+        b"\xff\x10\x02"
         + escaped
         + b"\x10\x03"
         + crc16(body).to_bytes(2, "big")

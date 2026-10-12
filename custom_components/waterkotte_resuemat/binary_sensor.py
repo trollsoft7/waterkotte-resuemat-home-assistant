@@ -66,6 +66,7 @@ class ResumatBinarySensor(
 ):
     """Represent a Resümat binary sensor."""
 
+    _attr_has_entity_name = True
     entity_description: ResumatBinarySensorDescription
 
     def __init__(

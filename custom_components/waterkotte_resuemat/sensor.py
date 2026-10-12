@@ -135,6 +135,7 @@ async def async_setup_entry(
 class ResumatSensor(CoordinatorEntity[ResumatCoordinator], SensorEntity):
     """Represent a Resümat measurement."""
 
+    _attr_has_entity_name = True
     entity_description: ResumatSensorDescription
 
     def __init__(
@@ -166,6 +167,7 @@ class ResumatCommunicationSensor(
 ):
     """Expose serial communication progress and errors."""
 
+    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = True

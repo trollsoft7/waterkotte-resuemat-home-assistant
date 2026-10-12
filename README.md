@@ -55,7 +55,10 @@ includes communication-state changes and transmitted/received serial bytes.
 If a response times out before a valid frame is decoded, the error includes
 the decoder's remaining bytes and a preview of the received data.
 Controller responses use the `FF 10 02` start marker (distinct from the
-read-request framing).
+read-request framing). Response blocks are recognized by their Node-RED
+unescaped lengths (253 bytes for the first block and 80 for the second),
+including a 5-byte header and 5-byte trailer; doubled DLE bytes are unescaped
+before extracting the requested memory range.
 
 ## Notes
 

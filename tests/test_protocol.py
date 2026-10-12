@@ -99,38 +99,50 @@ class ProtocolTests(unittest.TestCase):
         ])
 
     def test_decoder_handles_split_escaped_frames(self) -> None:
-        """The decoder accepts controller response frames and unescapes DLEs."""
-        response = make_response(0x0017, b"first\x10second")
+        """The decoder unescapes DLEs and waits for the requested packet size."""
+        payload = b"first\x10second"
+        response = make_response(PROTOCOL.READ_RESPONSE, payload)
         decoder = FrameDecoder()
-        self.assertEqual(decoder.feed(response[:7]), [])
+        self.assertEqual(decoder.feed(response[:7], len(payload)), [])
         self.assertEqual(
-            decoder.feed(response[7:]),
-            [PROTOCOL.Frame(0x0017, b"first\x10second")],
+            decoder.feed(response[7:], len(payload)),
+            [PROTOCOL.Frame(PROTOCOL.READ_RESPONSE, payload)],
         )
 
     def test_response_start_matches_node_red_wire_frame(self) -> None:
-        """Controller replies start FF 10 02, not the command start marker."""
-        payload = bytes(range(243))
+        """A normal reply has the Node-RED 253-byte unescaped size."""
+        payload_data = bytearray(range(243))
+        payload_data[10] = 0x10
+        payload_data[20] = 0x10
+        payload_data[16] = 0x11
+        payload = bytes(payload_data)
         response = make_response(PROTOCOL.READ_RESPONSE, payload)
 
         self.assertEqual(response[:3], b"\xff\x10\x02")
-        self.assertEqual(len(response), 254)
-        self.assertEqual(FrameDecoder().feed(response), [
-            PROTOCOL.Frame(PROTOCOL.READ_RESPONSE, payload)
-        ])
+        self.assertEqual(len(response), 255)
+        self.assertEqual(len(response.replace(b"\x10\x10", b"\x10")), 253)
+        self.assertEqual(
+            FrameDecoder().feed(response, len(payload)),
+            [PROTOCOL.Frame(PROTOCOL.READ_RESPONSE, payload)],
+        )
 
     def test_decoder_exposes_incomplete_frame_bytes(self) -> None:
         """Partial response data remains available for timeout diagnostics."""
         decoder = FrameDecoder()
-        self.assertEqual(decoder.feed(b"\xff\x10"), [])
-        self.assertEqual(decoder.pending_data, b"\xff\x10")
+        prefix = b"\xff\x10\x02\x00\x17"
+        self.assertEqual(decoder.feed(prefix, 10), [])
+        self.assertEqual(decoder.pending_data, prefix)
 
-    def test_decoder_validates_crc(self) -> None:
-        """A complete response with an invalid checksum is rejected."""
-        response = bytearray(make_response(0x0017, b"data"))
-        response[-3] ^= 0x01
-        with self.assertRaises(ResumatProtocolError):
-            FrameDecoder().feed(response)
+    def test_decoder_accepts_node_red_sized_second_block(self) -> None:
+        """The second normal response is 80 bytes after DLE unescaping."""
+        payload = bytes(range(0x46))
+        response = make_response(PROTOCOL.READ_RESPONSE, payload)
+
+        self.assertEqual(len(response.replace(b"\x10\x10", b"\x10")), 0x46 + 10)
+        self.assertEqual(
+            FrameDecoder().feed(response, 0x46),
+            [PROTOCOL.Frame(PROTOCOL.READ_RESPONSE, payload)],
+        )
 
     def test_decode_readings_uses_controller_addresses(self) -> None:
         """Read-only measurements map to controller addresses."""
@@ -181,7 +193,7 @@ class ReceiveTimeoutTests(unittest.TestCase):
             async def read(self, _size: int) -> bytes:
                 if not self.sent_partial_frame:
                     self.sent_partial_frame = True
-                    return b"\x16\x10"
+                    return b"\xff\x10\x02\x00\x17"
                 await asyncio.Future()
 
         client = ResumatClient("/dev/null")
@@ -191,7 +203,8 @@ class ReceiveTimeoutTests(unittest.TestCase):
         try:
             with self.assertRaisesRegex(
                 TimeoutError,
-                "received 2 wire bytes; decoder buffer: 1610; received data: 1610",
+                "received 5 wire bytes; decoder buffer: ff10020017; "
+                "received data: ff10020017",
             ):
                 await client._async_receive(10)
         finally:
@@ -207,7 +220,7 @@ class ReceiveTimeoutTests(unittest.TestCase):
 
             def __init__(self) -> None:
                 self.chunks = [
-                    make_response(PROTOCOL.READ_RESPONSE, b"short"),
+                    make_response(0x0001, b"short"),
                     make_response(PROTOCOL.READ_RESPONSE, b"full-block"),
                 ]
 
@@ -295,16 +308,10 @@ class ReceiveTimeoutTests(unittest.TestCase):
 
 
 def make_response(message_type: int, payload: bytes) -> bytes:
-    """Build a controller response frame for decoder tests."""
-    body = message_type.to_bytes(2, "big") + payload
+    """Build a Node-RED response packet for decoder tests."""
+    body = message_type.to_bytes(2, "big") + payload + bytes(5)
     escaped = body.replace(b"\x10", b"\x10\x10")
-    return (
-        b"\xff\x10\x02"
-        + escaped
-        + b"\x10\x03"
-        + crc16(body).to_bytes(2, "big")
-        + b"\x16"
-    )
+    return b"\xff\x10\x02" + escaped
 
 
 if __name__ == "__main__":

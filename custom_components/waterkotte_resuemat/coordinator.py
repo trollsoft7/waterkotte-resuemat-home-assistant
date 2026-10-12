@@ -41,11 +41,21 @@ class ResumatCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.client = client
         self.config_entry = config_entry
+        self.client.set_status_callback(self.async_update_listeners)
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Read both Node-RED data ranges from the heat pump."""
+        """Read the Node-RED data ranges without writing settings."""
+        import serialx
+
         try:
             return await self.client.async_read_data()
-        except (OSError, TimeoutError, ResumatProtocolError) as err:
+        except (
+            OSError,
+            TimeoutError,
+            ResumatProtocolError,
+            serialx.SerialException,
+        ) as err:
+            _LOGGER.debug("Serial polling failed: %s", err)
+            self.client.set_status("error", str(err))
             self.client.close()
             raise UpdateFailed(f"Unable to read the Resümat CD4: {err}") from err

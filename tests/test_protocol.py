@@ -23,8 +23,8 @@ SPEC.loader.exec_module(PROTOCOL)
 FrameDecoder = PROTOCOL.FrameDecoder
 READ_RANGES = PROTOCOL.READ_RANGES
 ResumatProtocolError = PROTOCOL.ResumatProtocolError
+ResumatClient = PROTOCOL.ResumatClient
 build_read_command = PROTOCOL.build_read_command
-build_write_command = PROTOCOL.build_write_command
 crc16 = PROTOCOL.crc16
 decode_readings = PROTOCOL.decode_readings
 
@@ -43,20 +43,38 @@ class ProtocolTests(unittest.TestCase):
             bytes.fromhex("1002011500f300461003f373"),
         )
 
-    def test_write_command_escapes_dle_and_checksums_unescaped_body(self) -> None:
-        """DLE bytes in write values are escaped without affecting the CRC."""
-        body = b"\x01\x13\x00\xf8" + struct.pack("<f", 16.0)
-        command = build_write_command(0x00F8, struct.pack("<f", 16.0))
-        self.assertEqual(command[:2], b"\x10\x02")
-        self.assertEqual(command[-4:], b"\x10\x03" + crc16(body).to_bytes(2, "big"))
-        self.assertEqual(
-            build_write_command(0x00F3, b"\x00"),
-            bytes.fromhex("1002011300f30010035672"),
-        )
-        self.assertEqual(
-            build_write_command(0x0010, b"\x00")[:8],
-            bytes.fromhex("1002011300101000"),
-        )
+    def test_integration_exposes_no_write_operations(self) -> None:
+        """The protocol client only builds and sends read requests."""
+        client = ResumatClient("/dev/null")
+        self.assertFalse(hasattr(client, "async_write_float"))
+        self.assertFalse(hasattr(client, "async_write_enabled"))
+        self.assertEqual(build_read_command(0, 4)[2:4], b"\x01\x15")
+
+    def test_client_reports_communication_status_changes(self) -> None:
+        """Every communication phase is exposed to registered listeners."""
+        client = ResumatClient("/dev/null")
+        changes: list[str] = []
+        client.set_status_callback(lambda: changes.append(client.status))
+        for status in (
+            "connecting",
+            "waking",
+            "sending_request",
+            "waiting_response",
+            "receiving",
+            "parsing",
+            "idle",
+        ):
+            client.set_status(status)
+
+        self.assertEqual(changes, [
+            "connecting",
+            "waking",
+            "sending_request",
+            "waiting_response",
+            "receiving",
+            "parsing",
+            "idle",
+        ])
 
     def test_decoder_handles_split_escaped_frames(self) -> None:
         """The stream decoder waits for split frames and unescapes DLE bytes."""
@@ -76,7 +94,7 @@ class ProtocolTests(unittest.TestCase):
             FrameDecoder().feed(response)
 
     def test_decode_readings_uses_controller_addresses(self) -> None:
-        """Measurements and writable setpoints map to flow addresses."""
+        """Read-only measurements map to controller addresses."""
         data = bytearray(sum(length for _, length in READ_RANGES))
         for address, value in {
             0x0008: 4.5,

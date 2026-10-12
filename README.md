@@ -3,10 +3,12 @@
 
 # Waterkotte Resümat CD4
 
-This repository contains a native Home Assistant integration for reading and
-controlling a Waterkotte Resümat CD4 heat-pump controller over a USB serial
-adapter. The original Node-RED flows (`flows.json` and `flows-4.json`) are kept
-as protocol references.
+This repository contains a read-only native Home Assistant integration for a
+Waterkotte Resümat CD4 heat-pump controller over a USB serial adapter. It sends
+only the controller wake-up and memory-read requests needed to retrieve
+measurements; it does not write settings or operating modes to the heat pump.
+The original Node-RED flows (`flows.json` and `flows-4.json`) are kept as
+protocol references.
 
 ## Installation
 
@@ -35,15 +37,19 @@ default polling interval is 120 seconds; change it in the integration options
 ## Entities
 
 The integration creates temperature and operating-hour sensors, binary sensors
-for heating/hot-water disablement and operation, switches to enable or disable
-heating and hot water, and number controls for the heating and hot-water
-setpoints. Setpoints are exposed as numbers rather than duplicate read-only
-sensors; their displayed values are read back from the controller.
+for heating/hot-water disablement and operation, and a diagnostic serial
+communication sensor. The diagnostic sensor reports states such as connecting,
+waking, sending a read request, waiting for a response, receiving, parsing,
+idle, and error. Its attributes show the selected serial port and the latest
+communication error. Setpoints are available as read-only sensors.
+
+For detailed protocol diagnostics, enable debug logging for
+`custom_components.waterkotte_resuemat` in Home Assistant's logger. The log
+includes communication-state changes and transmitted/received serial bytes.
 
 ## Notes
 
 The serial protocol and memory addresses are based on the included Node-RED
 flows and the [FHEM Waterkotte Resümat CD4 driver](https://github.com/mwllgr/fhem-waterkotte-resuemat-cd4).
 This integration has not been tested against every controller revision or
-serial adapter. Use it at your own risk, especially when writing setpoints or
-changing enablement.
+serial adapter. Use it at your own risk.

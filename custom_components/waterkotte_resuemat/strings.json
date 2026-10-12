@@ -41,14 +41,6 @@
         "name": "Hot water running"
       }
     },
-    "number": {
-      "heating_setpoint": {
-        "name": "Heating setpoint"
-      },
-      "hot_water_setpoint": {
-        "name": "Hot water setpoint"
-      }
-    },
     "sensor": {
       "outdoor_temperature": {
         "name": "Outdoor temperature"
@@ -85,14 +77,20 @@
       },
       "heating_start_temperature": {
         "name": "Heating start temperature"
-      }
-    },
-    "switch": {
-      "heating_enabled": {
-        "name": "Heating enabled"
       },
-      "hot_water_enabled": {
-        "name": "Hot water enabled"
+      "communication_status": {
+        "name": "Serial communication",
+        "state": {
+          "disconnected": "Disconnected",
+          "connecting": "Connecting",
+          "waking": "Waking controller",
+          "sending_request": "Sending read request",
+          "waiting_response": "Waiting for response",
+          "receiving": "Receiving data",
+          "parsing": "Parsing data",
+          "idle": "Idle",
+          "error": "Error"
+        }
       }
     }
   }

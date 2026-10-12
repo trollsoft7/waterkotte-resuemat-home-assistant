@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
+import logging
 import math
 import struct
 from typing import Final
@@ -19,6 +21,7 @@ READ_RESPONSE: Final = 0x0017
 _START: Final = b"\x16\x10\x02"
 _READ_MARKER: Final = b"\x10\x03"
 _MAX_BUFFER: Final = 8192
+_LOGGER = logging.getLogger(__name__)
 
 
 class ResumatProtocolError(Exception):
@@ -68,14 +71,6 @@ def build_read_command(address: int, length: int) -> bytes:
     if not 0 <= address <= 0xFFFF or not 1 <= length <= 0xFFFF:
         raise ValueError("Address and length must fit in 16 bits")
     body = b"\x01\x15" + address.to_bytes(2, "big") + length.to_bytes(2, "big")
-    return _build_command(body)
-
-
-def build_write_command(address: int, value: bytes) -> bytes:
-    """Build a memory write request."""
-    if not 0 <= address <= 0xFFFF or not value:
-        raise ValueError("Address must fit in 16 bits and value cannot be empty")
-    body = b"\x01\x13" + address.to_bytes(2, "big") + value
     return _build_command(body)
 
 
@@ -159,6 +154,22 @@ class ResumatClient:
         self._writer: asyncio.StreamWriter | None = None
         self._decoder = FrameDecoder()
         self._lock = asyncio.Lock()
+        self.status = "disconnected"
+        self.last_error: str | None = None
+        self._status_callback: Callable[[], None] | None = None
+
+    def set_status_callback(self, callback: Callable[[], None]) -> None:
+        """Register a callback for communication status changes."""
+        self._status_callback = callback
+
+    def set_status(self, status: str, error: str | None = None) -> None:
+        """Update communication status and notify Home Assistant entities."""
+        if status != self.status or error != self.last_error:
+            _LOGGER.debug("Serial status: %s%s", status, f": {error}" if error else "")
+        self.status = status
+        self.last_error = error
+        if self._status_callback is not None:
+            self._status_callback()
 
     def close(self) -> None:
         """Close an open serial connection."""
@@ -167,11 +178,14 @@ class ResumatClient:
         self._reader = None
         self._writer = None
         self._decoder = FrameDecoder()
+        if self.status != "error":
+            self.set_status("disconnected")
 
     async def _async_connect(self) -> None:
         """Open the serial port if needed."""
         if self._writer is not None and not self._writer.is_closing():
             return
+        self.set_status("connecting")
         import serialx
 
         self._reader, self._writer = await serialx.open_serial_connection(
@@ -183,10 +197,13 @@ class ResumatClient:
         )
         self._decoder = FrameDecoder()
 
-    async def _async_send(self, packet: bytes) -> None:
-        """Write bytes to the controller."""
+    async def _async_send_read_request(self, packet: bytes) -> None:
+        """Transmit a wake-up or read request only; never write controller values."""
         await self._async_connect()
         assert self._writer is not None
+        _LOGGER.debug(
+            "Transmitting %d read/wakeup bytes: %s", len(packet), packet.hex()
+        )
         self._writer.write(packet)
         await self._writer.drain()
 
@@ -201,7 +218,14 @@ class ResumatClient:
             chunk = await asyncio.wait_for(self._reader.read(512), remaining)
             if not chunk:
                 raise OSError("Serial port closed while waiting for a response")
+            _LOGGER.debug("Received %d serial bytes: %s", len(chunk), chunk.hex())
+            self.set_status("receiving")
             for frame in self._decoder.feed(chunk):
+                _LOGGER.debug(
+                    "Decoded frame type 0x%04x with %d payload bytes",
+                    frame.message_type,
+                    len(frame.payload),
+                )
                 if frame.message_type != READ_RESPONSE:
                     continue
                 if len(frame.payload) < expected_length:
@@ -213,34 +237,24 @@ class ResumatClient:
 
     async def _async_read_range(self, address: int, length: int) -> bytes:
         """Request and receive one contiguous address range."""
-        await self._async_send(build_read_command(address, length))
+        self.set_status("sending_request")
+        await self._async_send_read_request(build_read_command(address, length))
+        self.set_status("waiting_response")
         return await self._async_receive(length)
 
     async def async_read_data(self) -> dict[str, float | bool | None]:
-        """Read the ranges used by the Node-RED flow and setpoint control."""
+        """Read controller memory using read requests only."""
         async with self._lock:
             await self._async_connect()
-            await self._async_send(b"AT ")
+            self.set_status("waking")
+            await self._async_send_read_request(b"AT ")
             data = bytearray()
             for address, length in READ_RANGES:
                 data.extend(await self._async_read_range(address, length))
-            return decode_readings(data)
-
-    async def async_write_float(self, address: int, value: float) -> None:
-        """Write a little-endian float setpoint."""
-        if not math.isfinite(value):
-            raise ValueError("Setpoint must be a finite number")
-        async with self._lock:
-            await self._async_send(
-                build_write_command(address, struct.pack("<f", value))
-            )
-
-    async def async_write_enabled(self, address: int, enabled: bool) -> None:
-        """Write an enabled flag (zero means enabled in the controller)."""
-        async with self._lock:
-            await self._async_send(
-                build_write_command(address, bytes((0 if enabled else 1,)))
-            )
+            self.set_status("parsing")
+            readings = decode_readings(data)
+            self.set_status("idle")
+            return readings
 
 
 def _float_at(data: bytes | bytearray, address: int) -> float | None:

@@ -16,9 +16,7 @@ from .protocol import ResumatClient
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
-    Platform.NUMBER,
     Platform.SENSOR,
-    Platform.SWITCH,
 ]
 
 

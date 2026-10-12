@@ -41,14 +41,6 @@
         "name": "Warmwasser läuft"
       }
     },
-    "number": {
-      "heating_setpoint": {
-        "name": "Heizung Solltemperatur"
-      },
-      "hot_water_setpoint": {
-        "name": "Warmwasser Solltemperatur"
-      }
-    },
     "sensor": {
       "outdoor_temperature": {
         "name": "Außentemperatur"
@@ -85,14 +77,20 @@
       },
       "heating_start_temperature": {
         "name": "Heizung Einsatztemperatur"
-      }
-    },
-    "switch": {
-      "heating_enabled": {
-        "name": "Heizung freigegeben"
       },
-      "hot_water_enabled": {
-        "name": "Warmwasser freigegeben"
+      "communication_status": {
+        "name": "Serielle Kommunikation",
+        "state": {
+          "disconnected": "Getrennt",
+          "connecting": "Verbindung wird hergestellt",
+          "waking": "Regler wird geweckt",
+          "sending_request": "Leseanfrage wird gesendet",
+          "waiting_response": "Warte auf Antwort",
+          "receiving": "Daten werden empfangen",
+          "parsing": "Daten werden ausgewertet",
+          "idle": "Bereit",
+          "error": "Fehler"
+        }
       }
     }
   }

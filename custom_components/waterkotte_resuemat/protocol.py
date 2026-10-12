@@ -11,6 +11,8 @@ import struct
 from typing import Final
 
 BAUDRATE: Final = 9600
+WAKEUP_COMMAND: Final = b"AT\r"
+WAKEUP_DELAY: Final = 3
 READ_RANGES: Final = (
     (0x0000, 0x00F3),
     (0x00F3, 0x0046),
@@ -288,7 +290,9 @@ class ResumatClient:
         async with self._lock:
             await self._async_connect()
             self.set_status("waking")
-            await self._async_send_read_request(b"AT ")
+            await self._async_send_read_request(WAKEUP_COMMAND)
+            self.set_status("wakeup_delay")
+            await asyncio.sleep(WAKEUP_DELAY)
             data = bytearray()
             for address, length in READ_RANGES:
                 data.extend(await self._async_read_range(address, length))

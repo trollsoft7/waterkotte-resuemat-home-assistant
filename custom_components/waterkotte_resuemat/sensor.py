@@ -105,6 +105,7 @@ COMMUNICATION_STATES = (
     "disconnected",
     "connecting",
     "waking",
+    "wakeup_delay",
     "sending_request",
     "waiting_response",
     "receiving",

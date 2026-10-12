@@ -34,6 +34,10 @@ The integration uses 9600 baud, 8 data bits, no parity, and 1 stop bit. Its
 default polling interval is 120 seconds; change it in the integration options
 (30–3600 seconds).
 
+Before each poll, the integration sends the controller wake-up sequence
+`AT` followed by carriage return and waits three seconds before requesting
+memory data.
+
 ## Entities
 
 The integration creates temperature and operating-hour sensors, binary sensors

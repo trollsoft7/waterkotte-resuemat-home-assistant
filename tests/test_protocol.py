@@ -25,6 +25,8 @@ FrameDecoder = PROTOCOL.FrameDecoder
 READ_RANGES = PROTOCOL.READ_RANGES
 ResumatProtocolError = PROTOCOL.ResumatProtocolError
 ResumatClient = PROTOCOL.ResumatClient
+WAKEUP_COMMAND = PROTOCOL.WAKEUP_COMMAND
+WAKEUP_DELAY = PROTOCOL.WAKEUP_DELAY
 build_read_command = PROTOCOL.build_read_command
 crc16 = PROTOCOL.crc16
 decode_readings = PROTOCOL.decode_readings
@@ -44,6 +46,11 @@ class ProtocolTests(unittest.TestCase):
             bytes.fromhex("1002011500f300461003f373"),
         )
 
+    def test_wakeup_matches_reference_driver(self) -> None:
+        """Wake up the controller with AT plus carriage return before reading."""
+        self.assertEqual(WAKEUP_COMMAND, b"AT\r")
+        self.assertEqual(WAKEUP_DELAY, 3)
+
     def test_integration_exposes_no_write_operations(self) -> None:
         """The protocol client only builds and sends read requests."""
         client = ResumatClient("/dev/null")
@@ -59,6 +66,7 @@ class ProtocolTests(unittest.TestCase):
         for status in (
             "connecting",
             "waking",
+            "wakeup_delay",
             "sending_request",
             "waiting_response",
             "receiving",
@@ -70,6 +78,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(changes, [
             "connecting",
             "waking",
+            "wakeup_delay",
             "sending_request",
             "waiting_response",
             "receiving",

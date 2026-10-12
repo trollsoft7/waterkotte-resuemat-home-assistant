@@ -84,6 +84,7 @@
           "disconnected": "Disconnected",
           "connecting": "Connecting",
           "waking": "Waking controller",
+          "wakeup_delay": "Waiting after wake-up",
           "sending_request": "Sending read request",
           "waiting_response": "Waiting for response",
           "receiving": "Receiving data",

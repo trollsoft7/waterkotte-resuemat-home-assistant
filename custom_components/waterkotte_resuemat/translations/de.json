@@ -84,7 +84,6 @@
           "disconnected": "Getrennt",
           "connecting": "Verbindung wird hergestellt",
           "waking": "Regler wird geweckt",
-          "wakeup_delay": "Wartezeit nach dem Wecken",
           "sending_request": "Leseanfrage wird gesendet",
           "waiting_response": "Warte auf Antwort",
           "receiving": "Daten werden empfangen",

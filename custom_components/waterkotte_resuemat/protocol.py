@@ -11,13 +11,20 @@ import struct
 from typing import Final
 
 BAUDRATE: Final = 9600
-WAKEUP_COMMAND: Final = b"AT\r"
-WAKEUP_DELAY: Final = 3
+WAKEUP_COMMAND: Final = (
+    b"AT "
+    + bytes.fromhex(
+        "10020115000000041003cb9b03"
+        "10020115003000041003cb9de2889a"
+        "100201150034000410037dc3aa"
+    )
+    + bytes(1024)
+)
 READ_RANGES: Final = (
     (0x0000, 0x00F3),
     (0x00F3, 0x0046),
-    (0x0139, 0x0006),
 )
+MIN_READ_REQUEST_INTERVAL: Final = 30
 RESPONSE_TIMEOUT: Final = 10
 READ_RESPONSE: Final = 0x0017
 _START: Final = b"\x16\x10\x02"
@@ -161,6 +168,8 @@ class ResumatClient:
         self._writer: asyncio.StreamWriter | None = None
         self._decoder = FrameDecoder()
         self._lock = asyncio.Lock()
+        self._wakeup_sent = False
+        self._last_read_request_at: float | None = None
         self.status = "disconnected"
         self.last_error: str | None = None
         self._status_callback: Callable[[], None] | None = None
@@ -186,6 +195,7 @@ class ResumatClient:
         self._reader = None
         self._writer = None
         self._decoder = FrameDecoder()
+        self._wakeup_sent = False
         if self.status != "error":
             self.set_status("disconnected")
 
@@ -204,6 +214,16 @@ class ResumatClient:
             stopbits=1,
         )
         self._decoder = FrameDecoder()
+        self._wakeup_sent = False
+
+    async def _async_wake_if_needed(self) -> None:
+        """Unlock each newly opened serial connection without awaiting a reply."""
+        await self._async_connect()
+        if self._wakeup_sent:
+            return
+        self.set_status("waking")
+        await self._async_send_read_request(WAKEUP_COMMAND)
+        self._wakeup_sent = True
 
     async def _async_send_read_request(self, packet: bytes) -> None:
         """Transmit a wake-up or read request only; never write controller values."""
@@ -252,10 +272,13 @@ class ResumatClient:
                 if frame.message_type != READ_RESPONSE:
                     continue
                 if len(frame.payload) < expected_length:
-                    raise ResumatProtocolError(
-                        f"Read response contains {len(frame.payload)} bytes; "
-                        f"expected {expected_length}"
+                    _LOGGER.debug(
+                        "Ignoring short read response with %d payload bytes; "
+                        "expected %d",
+                        len(frame.payload),
+                        expected_length,
                     )
+                    continue
                 _LOGGER.debug(
                     "Received complete read response: %d wire bytes, "
                     "%d payload bytes (%s)",
@@ -280,19 +303,22 @@ class ResumatClient:
 
     async def _async_read_range(self, address: int, length: int) -> bytes:
         """Request and receive one contiguous address range."""
+        if self._last_read_request_at is not None:
+            elapsed = asyncio.get_running_loop().time() - self._last_read_request_at
+            remaining = MIN_READ_REQUEST_INTERVAL - elapsed
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+        await self._async_wake_if_needed()
         self.set_status("sending_request")
         await self._async_send_read_request(build_read_command(address, length))
+        self._last_read_request_at = asyncio.get_running_loop().time()
         self.set_status("waiting_response")
         return await self._async_receive(length)
 
     async def async_read_data(self) -> dict[str, float | bool | None]:
         """Read controller memory using read requests only."""
         async with self._lock:
-            await self._async_connect()
-            self.set_status("waking")
-            await self._async_send_read_request(WAKEUP_COMMAND)
-            self.set_status("wakeup_delay")
-            await asyncio.sleep(WAKEUP_DELAY)
+            await self._async_wake_if_needed()
             data = bytearray()
             for address, length in READ_RANGES:
                 data.extend(await self._async_read_range(address, length))
@@ -319,7 +345,7 @@ def decode_readings(data: bytes | bytearray) -> dict[str, float | bool | None]:
         "return_temperature_target": _float_at(data, 0x0014),
         "return_temperature": _float_at(data, 0x0018),
         "flow_temperature": _float_at(data, 0x001C),
-        "hot_water_setpoint": _float_at(data, 0x013B),
+        "hot_water_setpoint": _float_at(data, 0x0020),
         "hot_water_temperature": _float_at(data, 0x0024),
         "source_inlet_temperature": _float_at(data, 0x0030),
         "source_outlet_temperature": _float_at(data, 0x0034),

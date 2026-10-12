@@ -27,6 +27,8 @@ READ_RANGES: Final = (
 MIN_READ_REQUEST_INTERVAL: Final = 30
 RESPONSE_TIMEOUT: Final = 10
 HEATING_SETPOINT_ADDRESS: Final = 0x00F8
+HEATING_DISABLED_ADDRESS: Final = 0x00F3
+HOT_WATER_DISABLED_ADDRESS: Final = 0x0134
 MIN_HEATING_SETPOINT: Final = 18.0
 MAX_HEATING_SETPOINT: Final = 30.0
 READ_RESPONSE: Final = 0x0017
@@ -106,6 +108,18 @@ def build_write_float_command(address: int, value: float) -> bytes:
         b"\x01\x13"
         + address.to_bytes(2, "big")
         + struct.pack("<f", value)
+    )
+    return _build_command(body)
+
+
+def build_write_enabled_command(address: int, enabled: bool) -> bytes:
+    """Build a disable-flag write command for a supported operating mode."""
+    if address not in (HEATING_DISABLED_ADDRESS, HOT_WATER_DISABLED_ADDRESS):
+        raise ValueError(f"Unsupported enable flag address: 0x{address:04x}")
+    body = (
+        b"\x01\x13"
+        + address.to_bytes(2, "big")
+        + bytes((0 if enabled else 1,))
     )
     return _build_command(body)
 
@@ -258,17 +272,36 @@ class ResumatClient:
                 f"and {MAX_HEATING_SETPOINT:g} °C"
             )
 
+        await self._async_write_command(
+            build_write_float_command(HEATING_SETPOINT_ADDRESS, value),
+            "heating target",
+        )
+
+    async def async_set_heating_enabled(self, enabled: bool) -> None:
+        """Enable or disable space heating and verify the controller ACK."""
+        await self._async_write_command(
+            build_write_enabled_command(HEATING_DISABLED_ADDRESS, enabled),
+            "heating enable",
+        )
+
+    async def async_set_hot_water_enabled(self, enabled: bool) -> None:
+        """Enable or disable hot water and verify the controller ACK."""
+        await self._async_write_command(
+            build_write_enabled_command(HOT_WATER_DISABLED_ADDRESS, enabled),
+            "hot-water enable",
+        )
+
+    async def _async_write_command(self, packet: bytes, operation: str) -> None:
+        """Send one write under the shared serial lock and verify its ACK."""
         async with self._lock:
             await self._async_wake_if_needed()
             self.set_status("sending_write")
-            await self._async_send_read_request(
-                build_write_float_command(HEATING_SETPOINT_ADDRESS, value)
-            )
+            await self._async_send_read_request(packet)
             self.set_status("waiting_write_response")
-            await self._async_receive_write_confirmation()
+            await self._async_receive_write_confirmation(operation)
             self.set_status("idle")
 
-    async def _async_receive_write_confirmation(self) -> None:
+    async def _async_receive_write_confirmation(self, operation: str) -> None:
         """Verify the controller's short 0x0011 write acknowledgement."""
         assert self._reader is not None
         loop = asyncio.get_running_loop()
@@ -278,7 +311,9 @@ class ResumatClient:
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                raise TimeoutError("Timed out waiting for the heating write ACK")
+                raise TimeoutError(
+                    f"Timed out waiting for the {operation} write ACK"
+                )
             try:
                 chunk = await asyncio.wait_for(
                     self._reader.read(512),
@@ -286,11 +321,14 @@ class ResumatClient:
                 )
             except asyncio.TimeoutError:
                 raise TimeoutError(
-                    "Timed out waiting for the heating write ACK; "
+                    f"Timed out waiting for the {operation} write ACK; "
                     f"received {received.hex() or 'no bytes'}"
                 ) from None
             if not chunk:
-                raise OSError("Serial port closed while waiting for the write ACK")
+                raise OSError(
+                    f"Serial port closed while waiting for the {operation} "
+                    "write ACK"
+                )
             received.extend(chunk)
             self.set_status("receiving")
 
@@ -299,11 +337,12 @@ class ResumatClient:
                 continue
             if status != 0:
                 raise ResumatProtocolError(
-                    f"Controller rejected the heating target write with "
+                    f"Controller rejected the {operation} write with "
                     f"status 0x{status:02x}; reply: {received.hex()}"
                 )
             _LOGGER.debug(
-                "Heating target write acknowledged successfully: %s",
+                "%s write acknowledged successfully: %s",
+                operation,
                 received.hex(),
             )
             return

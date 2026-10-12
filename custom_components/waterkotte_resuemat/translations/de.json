@@ -28,17 +28,33 @@
   },
   "entity": {
     "binary_sensor": {
-      "heating_disabled": {
-        "name": "Heizung abgeschaltet"
-      },
-      "hot_water_disabled": {
-        "name": "Warmwasser abgeschaltet"
-      },
       "heating_running": {
-        "name": "Heizung läuft"
+        "name": "Heizbetrieb",
+        "state": {
+          "on": "Heizt",
+          "off": "Aus"
+        }
       },
       "hot_water_running": {
-        "name": "Warmwasser läuft"
+        "name": "Warmwasserbetrieb",
+        "state": {
+          "on": "Bereitet Warmwasser",
+          "off": "Aus"
+        }
+      },
+      "heating_enabled": {
+        "name": "Heizung",
+        "state": {
+          "on": "Aktiv",
+          "off": "Deaktiviert"
+        }
+      },
+      "hot_water_enabled": {
+        "name": "Warmwasser",
+        "state": {
+          "on": "Aktiv",
+          "off": "Deaktiviert"
+        }
       }
     },
     "sensor": {

@@ -30,6 +30,7 @@ MIN_READ_REQUEST_INTERVAL = PROTOCOL.MIN_READ_REQUEST_INTERVAL
 build_read_command = PROTOCOL.build_read_command
 crc16 = PROTOCOL.crc16
 decode_readings = PROTOCOL.decode_readings
+enabled_from_disabled_flag = PROTOCOL.enabled_from_disabled_flag
 
 
 class ProtocolTests(unittest.TestCase):
@@ -64,6 +65,11 @@ class ProtocolTests(unittest.TestCase):
         """Only the two flow memory blocks are requested."""
         self.assertEqual(READ_RANGES, ((0x0000, 0x00F3), (0x00F3, 0x0046)))
         self.assertEqual(MIN_READ_REQUEST_INTERVAL, 30)
+
+    def test_disabled_flags_map_to_enabled_states(self) -> None:
+        """Disabled controller bits are inverted for user-facing status."""
+        self.assertFalse(enabled_from_disabled_flag(True))
+        self.assertTrue(enabled_from_disabled_flag(False))
 
     def test_integration_exposes_no_write_operations(self) -> None:
         """The protocol client only builds and sends read requests."""

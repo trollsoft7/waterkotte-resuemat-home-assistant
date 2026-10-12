@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from homeassistant.components.binary_sensor import (
-    BinarySensorDeviceClass,
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
@@ -17,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import ResumatCoordinator
+from .protocol import enabled_from_disabled_flag
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -27,23 +27,19 @@ class ResumatBinarySensorDescription(BinarySensorEntityDescription):
 DESCRIPTIONS = (
     ResumatBinarySensorDescription(
         key="heating_disabled",
-        translation_key="heating_disabled",
-        device_class=BinarySensorDeviceClass.PROBLEM,
+        translation_key="heating_enabled",
     ),
     ResumatBinarySensorDescription(
         key="hot_water_disabled",
-        translation_key="hot_water_disabled",
-        device_class=BinarySensorDeviceClass.PROBLEM,
+        translation_key="hot_water_enabled",
     ),
     ResumatBinarySensorDescription(
         key="heating_running",
         translation_key="heating_running",
-        device_class=BinarySensorDeviceClass.HEAT,
     ),
     ResumatBinarySensorDescription(
         key="hot_water_running",
         translation_key="hot_water_running",
-        device_class=BinarySensorDeviceClass.HEAT,
     ),
 )
 
@@ -88,6 +84,13 @@ class ResumatBinarySensor(
 
     @property
     def is_on(self) -> bool | None:
-        """Return whether the reported condition is active."""
+        """Return the user-facing state, inverting controller disable flags."""
         value = self.coordinator.data.get(self.entity_description.key)
-        return value if isinstance(value, bool) else None
+        if not isinstance(value, bool):
+            return None
+        if self.entity_description.key in {
+            "heating_disabled",
+            "hot_water_disabled",
+        }:
+            return enabled_from_disabled_flag(value)
+        return value

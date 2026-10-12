@@ -28,17 +28,33 @@
   },
   "entity": {
     "binary_sensor": {
-      "heating_disabled": {
-        "name": "Heating disabled"
-      },
-      "hot_water_disabled": {
-        "name": "Hot water disabled"
-      },
       "heating_running": {
-        "name": "Heating running"
+        "name": "Heating operation",
+        "state": {
+          "on": "Heating",
+          "off": "Off"
+        }
       },
       "hot_water_running": {
-        "name": "Hot water running"
+        "name": "Hot water operation",
+        "state": {
+          "on": "Heating water",
+          "off": "Off"
+        }
+      },
+      "heating_enabled": {
+        "name": "Heating",
+        "state": {
+          "on": "Active",
+          "off": "Disabled"
+        }
+      },
+      "hot_water_enabled": {
+        "name": "Hot water",
+        "state": {
+          "on": "Active",
+          "off": "Disabled"
+        }
       }
     },
     "sensor": {

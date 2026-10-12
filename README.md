@@ -1,4 +1,5 @@
-<img width="1295" alt="image" src="https://github.com/trollsoft7/waterkotte-resuemat-nodered/assets/51830290/323fe60a-1a9b-4855-8921-15712c234661">
+<img width="1746" height="919" alt="image" src="https://github.com/user-attachments/assets/36a25ae0-7beb-462d-ab21-9d4d35b94f15" />
+
 
 
 # Waterkotte Resümat CD4

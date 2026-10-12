@@ -315,23 +315,21 @@ class ResumatClient:
                 response.append(byte)
                 index += 1
 
-        start = response.find(_RESPONSE_HEADER)
-        if start < 0:
+        if len(response) < 14:
             raise ResumatProtocolError(
-                "Heating write reply did not contain a controller response header"
-            )
-        if len(response) - start < 14:
-            raise ResumatProtocolError(
-                "Heating write reply did not contain the returned setpoint"
+                "Heating write reply did not contain the returned setpoint; "
+                f"received {len(response)} unescaped bytes: {response.hex() or 'none'}"
             )
 
-        confirmed = struct.unpack_from("<f", response, start + 10)[0]
+        # Node-RED parses the float at absolute offset 10 for any short reply;
+        # write acknowledgements do not necessarily use the read-response type.
+        confirmed = struct.unpack_from("<f", response, 10)[0]
         if not math.isfinite(confirmed) or not math.isclose(
             confirmed, requested, rel_tol=0.0, abs_tol=0.01
         ):
             raise ResumatProtocolError(
                 f"Controller confirmed {confirmed:g} °C instead of "
-                f"{requested:g} °C"
+                f"{requested:g} °C; reply bytes: {response.hex()}"
             )
         return confirmed
 

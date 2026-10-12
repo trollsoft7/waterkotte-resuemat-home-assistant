@@ -179,7 +179,8 @@ class ReceiveTimeoutTests(unittest.TestCase):
         PROTOCOL.RESPONSE_TIMEOUT = 0.01
         try:
             with self.assertRaisesRegex(
-                TimeoutError, "received 2 wire bytes; partial frame: 1610"
+                TimeoutError,
+                "received 2 wire bytes; decoder buffer: 1610; received data: 1610",
             ):
                 await client._async_receive(10)
         finally:

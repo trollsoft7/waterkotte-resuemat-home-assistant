@@ -48,6 +48,9 @@ communication sensor. The diagnostic sensor reports states such as connecting,
 waking, sending a read request, waiting for a response, receiving, parsing,
 idle, and error. Its attributes show the selected serial port and the latest
 communication error. Setpoints are available as read-only sensors.
+Heating and hot-water operating states display localized active/off labels;
+their enablement sensors report active when the controller's disable flag is
+clear.
 
 For detailed protocol diagnostics, enable debug logging for
 `custom_components.waterkotte_resuemat` in Home Assistant's logger. The log

@@ -61,6 +61,11 @@ def crc16(data: bytes) -> int:
     return crc
 
 
+def enabled_from_disabled_flag(disabled: bool) -> bool:
+    """Convert a controller disable bit to a user-facing enabled state."""
+    return not disabled
+
+
 def _escape(data: bytes) -> bytes:
     """Escape DLE bytes in a frame body."""
     return data.replace(b"\x10", b"\x10\x10")

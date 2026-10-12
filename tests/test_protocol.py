@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 from pathlib import Path
 import struct
@@ -86,6 +87,12 @@ class ProtocolTests(unittest.TestCase):
             [PROTOCOL.Frame(0x0017, b"first\x10second")],
         )
 
+    def test_decoder_exposes_incomplete_frame_bytes(self) -> None:
+        """Partial response data remains available for timeout diagnostics."""
+        decoder = FrameDecoder()
+        self.assertEqual(decoder.feed(b"\x16\x10"), [])
+        self.assertEqual(decoder.pending_data, b"\x16\x10")
+
     def test_decoder_validates_crc(self) -> None:
         """A complete response with an invalid checksum is rejected."""
         response = bytearray(make_response(0x0017, b"data"))
@@ -123,6 +130,36 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(readings["hot_water_disabled"])
         self.assertTrue(readings["heating_running"])
         self.assertFalse(readings["hot_water_running"])
+
+
+class ReceiveTimeoutTests(unittest.IsolatedAsyncioTestCase):
+    """Verify diagnostic details when the controller response is incomplete."""
+
+    async def test_timeout_includes_received_byte_count_and_frame(self) -> None:
+        """A response timeout reports the bytes received so far."""
+        class PartialReader:
+            """Return a partial frame and then wait for more input."""
+
+            def __init__(self) -> None:
+                self.sent_partial_frame = False
+
+            async def read(self, _size: int) -> bytes:
+                if not self.sent_partial_frame:
+                    self.sent_partial_frame = True
+                    return b"\x16\x10"
+                await asyncio.Future()
+
+        client = ResumatClient("/dev/null")
+        client._reader = PartialReader()
+        old_timeout = PROTOCOL.RESPONSE_TIMEOUT
+        PROTOCOL.RESPONSE_TIMEOUT = 0.01
+        try:
+            with self.assertRaisesRegex(
+                TimeoutError, "received 2 wire bytes; partial frame: 1610"
+            ):
+                await client._async_receive(10)
+        finally:
+            PROTOCOL.RESPONSE_TIMEOUT = old_timeout
 
 
 def make_response(message_type: int, payload: bytes) -> bytes:

@@ -81,6 +81,11 @@ class FrameDecoder:
         """Initialize the stream buffer."""
         self._buffer = bytearray()
 
+    @property
+    def pending_data(self) -> bytes:
+        """Return buffered bytes that have not formed a complete frame."""
+        return bytes(self._buffer)
+
     def feed(self, data: bytes) -> list[Frame]:
         """Append bytes and return all complete frames."""
         self._buffer.extend(data)
@@ -164,8 +169,9 @@ class ResumatClient:
 
     def set_status(self, status: str, error: str | None = None) -> None:
         """Update communication status and notify Home Assistant entities."""
-        if status != self.status or error != self.last_error:
-            _LOGGER.debug("Serial status: %s%s", status, f": {error}" if error else "")
+        if status == self.status and error == self.last_error:
+            return
+        _LOGGER.debug("Serial status: %s%s", status, f": {error}" if error else "")
         self.status = status
         self.last_error = error
         if self._status_callback is not None:
@@ -211,14 +217,29 @@ class ResumatClient:
         """Wait for a read response with the requested data length."""
         assert self._reader is not None
         deadline = asyncio.get_running_loop().time() + RESPONSE_TIMEOUT
+        received = bytearray()
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                raise TimeoutError("Timed out waiting for a controller response")
-            chunk = await asyncio.wait_for(self._reader.read(512), remaining)
+                chunk = b""
+            else:
+                try:
+                    chunk = await asyncio.wait_for(
+                        self._reader.read(512), remaining
+                    )
+                except asyncio.TimeoutError as err:
+                    detail = self._response_timeout_detail(
+                        expected_length, received
+                    )
+                    _LOGGER.debug("%s", detail)
+                    raise TimeoutError(detail) from err
+            if not chunk and remaining <= 0:
+                detail = self._response_timeout_detail(expected_length, received)
+                _LOGGER.debug("%s", detail)
+                raise TimeoutError(detail)
             if not chunk:
                 raise OSError("Serial port closed while waiting for a response")
-            _LOGGER.debug("Received %d serial bytes: %s", len(chunk), chunk.hex())
+            received.extend(chunk)
             self.set_status("receiving")
             for frame in self._decoder.feed(chunk):
                 _LOGGER.debug(
@@ -233,7 +254,27 @@ class ResumatClient:
                         f"Read response contains {len(frame.payload)} bytes; "
                         f"expected {expected_length}"
                     )
+                _LOGGER.debug(
+                    "Received complete read response: %d wire bytes, "
+                    "%d payload bytes (%s)",
+                    len(received),
+                    len(frame.payload),
+                    received.hex(),
+                )
                 return frame.payload[:expected_length]
+
+    def _response_timeout_detail(
+        self, expected_length: int, received: bytearray
+    ) -> str:
+        """Describe partial bytes received before a response timeout."""
+        partial = self._decoder.pending_data or bytes(received)
+        preview = partial[:128].hex()
+        suffix = "..." if len(partial) > 128 else ""
+        return (
+            f"Timed out waiting for read response (expected {expected_length} "
+            f"payload bytes, received {len(received)} wire bytes; "
+            f"partial frame: {preview}{suffix or 'none'})"
+        )
 
     async def _async_read_range(self, address: int, length: int) -> bytes:
         """Request and receive one contiguous address range."""

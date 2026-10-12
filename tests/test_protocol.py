@@ -313,7 +313,7 @@ class ReceiveTimeoutTests(unittest.TestCase):
         packets: list[bytes] = []
         client._async_connect = lambda: asyncio.sleep(0)
         client._async_send_read_request = capture_packet(packets)
-        reply = make_write_reply(21.0)
+        reply = make_write_reply(21.0, message_type=0x0015)
         client._reader = ChunkedReader([reply[:8], reply[8:]])
 
         old_idle_timeout = PROTOCOL.WRITE_ACK_IDLE_TIMEOUT
@@ -344,7 +344,8 @@ class ReceiveTimeoutTests(unittest.TestCase):
         PROTOCOL.WRITE_ACK_IDLE_TIMEOUT = 0.01
         try:
             with self.assertRaisesRegex(
-                ResumatProtocolError, "confirmed 22 °C instead of 21 °C"
+                ResumatProtocolError,
+                "confirmed 22 °C instead of 21 °C; reply bytes: ff10020017",
             ):
                 await client.async_set_heating_setpoint(21.0)
         finally:
@@ -418,10 +419,11 @@ def make_response(message_type: int, payload: bytes) -> bytes:
     return b"\xff\x10\x02" + escaped
 
 
-def make_write_reply(value: float) -> bytes:
+def make_write_reply(value: float, message_type: int = 0x0017) -> bytes:
     """Build the short Node-RED reply with the returned target at offset 10."""
     payload = b"\x00\x10\x00\x00\x00" + struct.pack("<f", value)
-    return b"\xff\x10\x02\x00\x17" + payload.replace(b"\x10", b"\x10\x10")
+    header = b"\xff\x10\x02" + message_type.to_bytes(2, "big")
+    return header + payload.replace(b"\x10", b"\x10\x10")
 
 
 def capture_packet(packets: list[bytes]):

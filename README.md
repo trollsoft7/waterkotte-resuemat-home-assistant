@@ -34,9 +34,11 @@ The integration uses 9600 baud, 8 data bits, no parity, and 1 stop bit. Its
 default polling interval is 120 seconds; change it in the integration options
 (30–3600 seconds).
 
-Before each poll, the integration sends the controller wake-up sequence
-`AT` followed by carriage return and waits three seconds before requesting
-memory data.
+Once per serial connection, the integration sends the captured 1068-byte
+controller unlock sequence: `AT `, three opaque protocol frames, and 1024
+zero bytes. It does not wait for an acknowledgement; regular reads start
+immediately afterward. The integration reads address ranges `0x0000–0x00F2`
+and `0x00F3–0x0138`, with at least 30 seconds between read requests.
 
 ## Entities
 

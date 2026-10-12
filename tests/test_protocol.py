@@ -26,7 +26,7 @@ READ_RANGES = PROTOCOL.READ_RANGES
 ResumatProtocolError = PROTOCOL.ResumatProtocolError
 ResumatClient = PROTOCOL.ResumatClient
 WAKEUP_COMMAND = PROTOCOL.WAKEUP_COMMAND
-WAKEUP_DELAY = PROTOCOL.WAKEUP_DELAY
+MIN_READ_REQUEST_INTERVAL = PROTOCOL.MIN_READ_REQUEST_INTERVAL
 build_read_command = PROTOCOL.build_read_command
 crc16 = PROTOCOL.crc16
 decode_readings = PROTOCOL.decode_readings
@@ -47,9 +47,23 @@ class ProtocolTests(unittest.TestCase):
         )
 
     def test_wakeup_matches_reference_driver(self) -> None:
-        """Wake up the controller with AT plus carriage return before reading."""
-        self.assertEqual(WAKEUP_COMMAND, b"AT\r")
-        self.assertEqual(WAKEUP_DELAY, 3)
+        """Wake-up bytes match the captured Node-RED payload exactly."""
+        expected = (
+            b"AT "
+            + bytes.fromhex(
+                "10020115000000041003cb9b03"
+                "10020115003000041003cb9de2889a"
+                "100201150034000410037dc3aa"
+            )
+            + bytes(1024)
+        )
+        self.assertEqual(WAKEUP_COMMAND, expected)
+        self.assertEqual(len(WAKEUP_COMMAND), 1068)
+
+    def test_read_ranges_match_node_red_flow(self) -> None:
+        """Only the two flow memory blocks are requested."""
+        self.assertEqual(READ_RANGES, ((0x0000, 0x00F3), (0x00F3, 0x0046)))
+        self.assertEqual(MIN_READ_REQUEST_INTERVAL, 30)
 
     def test_integration_exposes_no_write_operations(self) -> None:
         """The protocol client only builds and sends read requests."""
@@ -66,7 +80,6 @@ class ProtocolTests(unittest.TestCase):
         for status in (
             "connecting",
             "waking",
-            "wakeup_delay",
             "sending_request",
             "waiting_response",
             "receiving",
@@ -78,7 +91,6 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(changes, [
             "connecting",
             "waking",
-            "wakeup_delay",
             "sending_request",
             "waiting_response",
             "receiving",
@@ -119,7 +131,7 @@ class ProtocolTests(unittest.TestCase):
             0x006A: 1234.0,
             0x00F4: 20.0,
             0x00F8: 28.0,
-            0x013B: 52.0,
+            0x0020: 52.0,
         }.items():
             struct.pack_into("<f", data, address, value)
         data[0x00F3] = 1
@@ -172,6 +184,102 @@ class ReceiveTimeoutTests(unittest.TestCase):
                 await client._async_receive(10)
         finally:
             PROTOCOL.RESPONSE_TIMEOUT = old_timeout
+
+    def test_short_preamble_response_is_ignored(self) -> None:
+        """Short frames do not satisfy a full block read response."""
+        asyncio.run(self._async_test_short_preamble_response_is_ignored())
+
+    async def _async_test_short_preamble_response_is_ignored(self) -> None:
+        class PreambleReader:
+            """Return a short response followed by a complete read response."""
+
+            def __init__(self) -> None:
+                self.chunks = [
+                    make_response(PROTOCOL.READ_RESPONSE, b"short"),
+                    make_response(PROTOCOL.READ_RESPONSE, b"full-block"),
+                ]
+
+            async def read(self, _size: int) -> bytes:
+                return self.chunks.pop(0)
+
+        client = ResumatClient("/dev/null")
+        client._reader = PreambleReader()
+        self.assertEqual(await client._async_receive(10), b"full-block")
+
+    def test_wakeup_is_sent_once_per_connection_without_acknowledgement(self) -> None:
+        """Wake-up is a one-way unlock before directly starting the reads."""
+        asyncio.run(self._async_test_wakeup_is_sent_once_per_connection())
+
+    async def _async_test_wakeup_is_sent_once_per_connection(self) -> None:
+        client = ResumatClient("/dev/null")
+        packets: list[bytes] = []
+        receive_lengths: list[int] = []
+
+        async def connect() -> None:
+            return None
+
+        async def send(packet: bytes) -> None:
+            packets.append(packet)
+
+        async def receive(length: int) -> bytes:
+            receive_lengths.append(length)
+            return bytes(length)
+
+        client._async_connect = connect
+        client._async_send_read_request = send
+        client._async_receive = receive
+        original_interval = PROTOCOL.MIN_READ_REQUEST_INTERVAL
+        PROTOCOL.MIN_READ_REQUEST_INTERVAL = 0
+        try:
+            await client.async_read_data()
+            await client.async_read_data()
+        finally:
+            PROTOCOL.MIN_READ_REQUEST_INTERVAL = original_interval
+
+        self.assertEqual(packets.count(WAKEUP_COMMAND), 1)
+        self.assertEqual(receive_lengths, [0x00F3, 0x0046, 0x00F3, 0x0046])
+        self.assertEqual(
+            packets[1:3],
+            [
+                build_read_command(0x0000, 0x00F3),
+                build_read_command(0x00F3, 0x0046),
+            ],
+        )
+        self.assertEqual(
+            packets[3:],
+            [
+                build_read_command(0x0000, 0x00F3),
+                build_read_command(0x00F3, 0x0046),
+            ],
+        )
+
+    def test_read_requests_are_rate_limited(self) -> None:
+        """Normal read requests are separated by the configured minimum."""
+        asyncio.run(self._async_test_read_requests_are_rate_limited())
+
+    async def _async_test_read_requests_are_rate_limited(self) -> None:
+        client = ResumatClient("/dev/null")
+        send_times: list[float] = []
+
+        async def send(packet: bytes) -> None:
+            if packet != WAKEUP_COMMAND:
+                send_times.append(asyncio.get_running_loop().time())
+
+        async def receive(length: int) -> bytes:
+            return bytes(length)
+
+        client._async_connect = lambda: asyncio.sleep(0)
+        client._async_send_read_request = send
+        client._async_receive = receive
+        original_interval = PROTOCOL.MIN_READ_REQUEST_INTERVAL
+        PROTOCOL.MIN_READ_REQUEST_INTERVAL = 0.01
+        try:
+            await client.async_read_data()
+        finally:
+            PROTOCOL.MIN_READ_REQUEST_INTERVAL = original_interval
+
+        self.assertEqual(len(send_times), 2)
+        self.assertGreaterEqual(send_times[1] - send_times[0], 0.01)
 
 
 def make_response(message_type: int, payload: bytes) -> bytes:

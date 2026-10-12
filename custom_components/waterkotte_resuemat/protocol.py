@@ -26,6 +26,10 @@ READ_RANGES: Final = (
 )
 MIN_READ_REQUEST_INTERVAL: Final = 30
 RESPONSE_TIMEOUT: Final = 10
+WRITE_ACK_IDLE_TIMEOUT: Final = 0.3
+HEATING_SETPOINT_ADDRESS: Final = 0x00F8
+MIN_HEATING_SETPOINT: Final = 18.0
+MAX_HEATING_SETPOINT: Final = 30.0
 READ_RESPONSE: Final = 0x0017
 _START: Final = b"\xff\x10\x02"
 _RESPONSE_HEADER: Final = _START + READ_RESPONSE.to_bytes(2, "big")
@@ -87,6 +91,20 @@ def build_read_command(address: int, length: int) -> bytes:
     if not 0 <= address <= 0xFFFF or not 1 <= length <= 0xFFFF:
         raise ValueError("Address and length must fit in 16 bits")
     body = b"\x01\x15" + address.to_bytes(2, "big") + length.to_bytes(2, "big")
+    return _build_command(body)
+
+
+def build_write_float_command(address: int, value: float) -> bytes:
+    """Build a float write command using the Node-RED 0x0113 packet format."""
+    if not 0 <= address <= 0xFFFF:
+        raise ValueError("Address must fit in 16 bits")
+    if not math.isfinite(value):
+        raise ValueError("Value must be finite")
+    body = (
+        b"\x01\x13"
+        + address.to_bytes(2, "big")
+        + struct.pack("<f", value)
+    )
     return _build_command(body)
 
 
@@ -218,14 +236,104 @@ class ResumatClient:
         self._wakeup_sent = True
 
     async def _async_send_read_request(self, packet: bytes) -> None:
-        """Transmit a wake-up or read request only; never write controller values."""
+        """Transmit a protocol packet."""
         await self._async_connect()
         assert self._writer is not None
         _LOGGER.debug(
-            "Transmitting %d read/wakeup bytes: %s", len(packet), packet.hex()
+            "Transmitting %d serial bytes: %s", len(packet), packet.hex()
         )
         self._writer.write(packet)
         await self._writer.drain()
+
+    async def async_set_heating_setpoint(self, value: float) -> float:
+        """Write the heating target and verify it against the controller reply."""
+        if (
+            not math.isfinite(value)
+            or not MIN_HEATING_SETPOINT <= value <= MAX_HEATING_SETPOINT
+        ):
+            raise ValueError(
+                f"Heating setpoint must be between {MIN_HEATING_SETPOINT:g} "
+                f"and {MAX_HEATING_SETPOINT:g} °C"
+            )
+
+        async with self._lock:
+            await self._async_wake_if_needed()
+            self.set_status("sending_write")
+            await self._async_send_read_request(
+                build_write_float_command(HEATING_SETPOINT_ADDRESS, value)
+            )
+            self.set_status("waiting_write_response")
+            confirmed = await self._async_receive_write_confirmation(value)
+            self.set_status("idle")
+            return confirmed
+
+    async def _async_receive_write_confirmation(self, requested: float) -> float:
+        """Collect the short Node-RED write reply and check its setpoint value."""
+        assert self._reader is not None
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + RESPONSE_TIMEOUT
+        received = bytearray()
+
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError("Timed out waiting for the heating write reply")
+            timeout = min(
+                WRITE_ACK_IDLE_TIMEOUT if received else remaining,
+                remaining,
+            )
+            try:
+                chunk = await asyncio.wait_for(self._reader.read(512), timeout)
+            except asyncio.TimeoutError:
+                if received:
+                    break
+                raise TimeoutError(
+                    "Timed out waiting for the heating write reply"
+                ) from None
+            if not chunk:
+                raise OSError("Serial port closed while waiting for the write reply")
+            received.extend(chunk)
+            self.set_status("receiving")
+
+        _LOGGER.debug(
+            "Received heating write reply (%d bytes): %s",
+            len(received),
+            received.hex(),
+        )
+        response = bytearray()
+        index = 0
+        while index < len(received):
+            byte = received[index]
+            if (
+                byte == 0x10
+                and index + 1 < len(received)
+                and received[index + 1] == 0x10
+            ):
+                response.append(byte)
+                index += 2
+            else:
+                response.append(byte)
+                index += 1
+
+        start = response.find(_RESPONSE_HEADER)
+        if start < 0:
+            raise ResumatProtocolError(
+                "Heating write reply did not contain a controller response header"
+            )
+        if len(response) - start < 14:
+            raise ResumatProtocolError(
+                "Heating write reply did not contain the returned setpoint"
+            )
+
+        confirmed = struct.unpack_from("<f", response, start + 10)[0]
+        if not math.isfinite(confirmed) or not math.isclose(
+            confirmed, requested, rel_tol=0.0, abs_tol=0.01
+        ):
+            raise ResumatProtocolError(
+                f"Controller confirmed {confirmed:g} °C instead of "
+                f"{requested:g} °C"
+            )
+        return confirmed
 
     async def _async_receive(self, expected_length: int) -> bytes:
         """Wait for a read response with the requested data length."""

@@ -28,6 +28,7 @@ ResumatClient = PROTOCOL.ResumatClient
 WAKEUP_COMMAND = PROTOCOL.WAKEUP_COMMAND
 MIN_READ_REQUEST_INTERVAL = PROTOCOL.MIN_READ_REQUEST_INTERVAL
 build_read_command = PROTOCOL.build_read_command
+build_write_float_command = PROTOCOL.build_write_float_command
 crc16 = PROTOCOL.crc16
 decode_readings = PROTOCOL.decode_readings
 enabled_from_disabled_flag = PROTOCOL.enabled_from_disabled_flag
@@ -46,6 +47,19 @@ class ProtocolTests(unittest.TestCase):
             build_read_command(0x00F3, 0x0046),
             bytes.fromhex("1002011500f300461003f373"),
         )
+
+    def test_heating_write_command_matches_node_red(self) -> None:
+        """Heating writes use Node-RED's 0x0113 float/CRC packet."""
+        self.assertEqual(
+            build_write_float_command(0x00F8, 21.0),
+            bytes.fromhex("1002011300f80000a84110035af9"),
+        )
+
+    def test_heating_write_command_rejects_non_finite_values(self) -> None:
+        """NaN and infinity cannot be encoded as heating targets."""
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.assertRaises(ValueError):
+                build_write_float_command(0x00F8, value)
 
     def test_wakeup_matches_reference_driver(self) -> None:
         """Wake-up bytes match the captured Node-RED payload exactly."""
@@ -71,9 +85,10 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(enabled_from_disabled_flag(True))
         self.assertTrue(enabled_from_disabled_flag(False))
 
-    def test_integration_exposes_no_write_operations(self) -> None:
-        """The protocol client only builds and sends read requests."""
+    def test_integration_only_exposes_heating_target_write(self) -> None:
+        """The only supported write changes the heating target."""
         client = ResumatClient("/dev/null")
+        self.assertTrue(callable(client.async_set_heating_setpoint))
         self.assertFalse(hasattr(client, "async_write_float"))
         self.assertFalse(hasattr(client, "async_write_enabled"))
         self.assertEqual(build_read_command(0, 4)[2:4], b"\x01\x15")
@@ -87,7 +102,9 @@ class ProtocolTests(unittest.TestCase):
             "connecting",
             "waking",
             "sending_request",
+            "sending_write",
             "waiting_response",
+            "waiting_write_response",
             "receiving",
             "parsing",
             "idle",
@@ -98,7 +115,9 @@ class ProtocolTests(unittest.TestCase):
             "connecting",
             "waking",
             "sending_request",
+            "sending_write",
             "waiting_response",
+            "waiting_write_response",
             "receiving",
             "parsing",
             "idle",
@@ -284,6 +303,85 @@ class ReceiveTimeoutTests(unittest.TestCase):
             ],
         )
 
+    def test_heating_write_requires_matching_controller_confirmation(self) -> None:
+        """Only a short reply containing the requested target confirms a write."""
+        asyncio.run(self._async_test_heating_write_confirmation())
+
+    async def _async_test_heating_write_confirmation(self) -> None:
+        client = ResumatClient("/dev/null")
+        client._wakeup_sent = True
+        packets: list[bytes] = []
+        client._async_connect = lambda: asyncio.sleep(0)
+        client._async_send_read_request = capture_packet(packets)
+        reply = make_write_reply(21.0)
+        client._reader = ChunkedReader([reply[:8], reply[8:]])
+
+        old_idle_timeout = PROTOCOL.WRITE_ACK_IDLE_TIMEOUT
+        PROTOCOL.WRITE_ACK_IDLE_TIMEOUT = 0.01
+        try:
+            confirmed = await client.async_set_heating_setpoint(21.0)
+        finally:
+            PROTOCOL.WRITE_ACK_IDLE_TIMEOUT = old_idle_timeout
+
+        self.assertEqual(confirmed, 21.0)
+        self.assertEqual(
+            packets,
+            [bytes.fromhex("1002011300f80000a84110035af9")],
+        )
+
+    def test_heating_write_rejects_a_different_confirmed_value(self) -> None:
+        """A reply with a different target is reported as a failed write."""
+        asyncio.run(self._async_test_heating_write_mismatch())
+
+    async def _async_test_heating_write_mismatch(self) -> None:
+        client = ResumatClient("/dev/null")
+        client._wakeup_sent = True
+        client._async_connect = lambda: asyncio.sleep(0)
+        client._async_send_read_request = capture_packet([])
+        client._reader = ChunkedReader([make_write_reply(22.0)])
+
+        old_idle_timeout = PROTOCOL.WRITE_ACK_IDLE_TIMEOUT
+        PROTOCOL.WRITE_ACK_IDLE_TIMEOUT = 0.01
+        try:
+            with self.assertRaisesRegex(
+                ResumatProtocolError, "confirmed 22 °C instead of 21 °C"
+            ):
+                await client.async_set_heating_setpoint(21.0)
+        finally:
+            PROTOCOL.WRITE_ACK_IDLE_TIMEOUT = old_idle_timeout
+
+    def test_heating_write_rejects_missing_reply(self) -> None:
+        """A missing serial acknowledgement must not be reported as success."""
+        asyncio.run(self._async_test_heating_write_missing_reply())
+
+    async def _async_test_heating_write_missing_reply(self) -> None:
+        class SilentReader:
+            async def read(self, _size: int) -> bytes:
+                await asyncio.Future()
+
+        client = ResumatClient("/dev/null")
+        client._wakeup_sent = True
+        client._async_connect = lambda: asyncio.sleep(0)
+        client._async_send_read_request = capture_packet([])
+        client._reader = SilentReader()
+        old_timeout = PROTOCOL.RESPONSE_TIMEOUT
+        PROTOCOL.RESPONSE_TIMEOUT = 0.01
+        try:
+            with self.assertRaisesRegex(TimeoutError, "waiting for the heating"):
+                await client.async_set_heating_setpoint(21.0)
+        finally:
+            PROTOCOL.RESPONSE_TIMEOUT = old_timeout
+
+    def test_heating_write_rejects_out_of_range_values(self) -> None:
+        """The write API enforces the same 18–30 °C range as the slider."""
+        asyncio.run(self._async_test_heating_write_range())
+
+    async def _async_test_heating_write_range(self) -> None:
+        client = ResumatClient("/dev/null")
+        for value in (17.9, 30.1, float("nan")):
+            with self.assertRaises(ValueError):
+                await client.async_set_heating_setpoint(value)
+
     def test_read_requests_are_rate_limited(self) -> None:
         """Normal read requests are separated by the configured minimum."""
         asyncio.run(self._async_test_read_requests_are_rate_limited())
@@ -318,6 +416,33 @@ def make_response(message_type: int, payload: bytes) -> bytes:
     body = message_type.to_bytes(2, "big") + payload + bytes(5)
     escaped = body.replace(b"\x10", b"\x10\x10")
     return b"\xff\x10\x02" + escaped
+
+
+def make_write_reply(value: float) -> bytes:
+    """Build the short Node-RED reply with the returned target at offset 10."""
+    payload = b"\x00\x10\x00\x00\x00" + struct.pack("<f", value)
+    return b"\xff\x10\x02\x00\x17" + payload.replace(b"\x10", b"\x10\x10")
+
+
+def capture_packet(packets: list[bytes]):
+    """Create a send stub that records protocol packets."""
+
+    async def send(packet: bytes) -> None:
+        packets.append(packet)
+
+    return send
+
+
+class ChunkedReader:
+    """Return configured serial chunks, then wait for more bytes."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = chunks
+
+    async def read(self, _size: int) -> bytes:
+        if self.chunks:
+            return self.chunks.pop(0)
+        await asyncio.Future()
 
 
 if __name__ == "__main__":

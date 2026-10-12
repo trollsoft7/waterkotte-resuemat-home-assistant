@@ -27,6 +27,11 @@
     }
   },
   "entity": {
+    "number": {
+      "heating_setpoint_control": {
+        "name": "Set heating target temperature"
+      }
+    },
     "binary_sensor": {
       "heating_running": {
         "name": "Heating operation",
@@ -94,6 +99,9 @@
       "heating_start_temperature": {
         "name": "Heating start temperature"
       },
+      "heating_setpoint": {
+        "name": "Heating target temperature"
+      },
       "communication_status": {
         "name": "Serial communication",
         "state": {
@@ -101,7 +109,9 @@
           "connecting": "Connecting",
           "waking": "Waking controller",
           "sending_request": "Sending read request",
+          "sending_write": "Sending heating target",
           "waiting_response": "Waiting for response",
+          "waiting_write_response": "Waiting for confirmation",
           "receiving": "Receiving data",
           "parsing": "Parsing data",
           "idle": "Idle",

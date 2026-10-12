@@ -99,6 +99,12 @@ DESCRIPTIONS = (
         device_class=SensorDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
     ),
+    ResumatSensorDescription(
+        key="heating_setpoint",
+        translation_key="heating_setpoint",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+    ),
 )
 
 COMMUNICATION_STATES = (
@@ -106,7 +112,9 @@ COMMUNICATION_STATES = (
     "connecting",
     "waking",
     "sending_request",
+    "sending_write",
     "waiting_response",
+    "waiting_write_response",
     "receiving",
     "parsing",
     "idle",

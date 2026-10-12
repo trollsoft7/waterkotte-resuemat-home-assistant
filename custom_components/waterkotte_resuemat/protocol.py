@@ -26,14 +26,16 @@ READ_RANGES: Final = (
 )
 MIN_READ_REQUEST_INTERVAL: Final = 30
 RESPONSE_TIMEOUT: Final = 10
-WRITE_ACK_IDLE_TIMEOUT: Final = 0.3
 HEATING_SETPOINT_ADDRESS: Final = 0x00F8
 MIN_HEATING_SETPOINT: Final = 18.0
 MAX_HEATING_SETPOINT: Final = 30.0
 READ_RESPONSE: Final = 0x0017
+WRITE_RESPONSE: Final = 0x0011
 _START: Final = b"\xff\x10\x02"
 _RESPONSE_HEADER: Final = _START + READ_RESPONSE.to_bytes(2, "big")
+_WRITE_RESPONSE_HEADER: Final = _START + WRITE_RESPONSE.to_bytes(2, "big")
 _RESPONSE_OVERHEAD: Final = 10
+_WRITE_ACK_LENGTH: Final = 11
 _READ_MARKER: Final = b"\x10\x03"
 _MAX_BUFFER: Final = 8192
 _LOGGER = logging.getLogger(__name__)
@@ -245,8 +247,8 @@ class ResumatClient:
         self._writer.write(packet)
         await self._writer.drain()
 
-    async def async_set_heating_setpoint(self, value: float) -> float:
-        """Write the heating target and verify it against the controller reply."""
+    async def async_set_heating_setpoint(self, value: float) -> None:
+        """Write the heating target and verify its CRC-protected controller ACK."""
         if (
             not math.isfinite(value)
             or not MIN_HEATING_SETPOINT <= value <= MAX_HEATING_SETPOINT
@@ -263,12 +265,11 @@ class ResumatClient:
                 build_write_float_command(HEATING_SETPOINT_ADDRESS, value)
             )
             self.set_status("waiting_write_response")
-            confirmed = await self._async_receive_write_confirmation(value)
+            await self._async_receive_write_confirmation()
             self.set_status("idle")
-            return confirmed
 
-    async def _async_receive_write_confirmation(self, requested: float) -> float:
-        """Collect the short Node-RED write reply and check its setpoint value."""
+    async def _async_receive_write_confirmation(self) -> None:
+        """Verify the controller's short 0x0011 write acknowledgement."""
         assert self._reader is not None
         loop = asyncio.get_running_loop()
         deadline = loop.time() + RESPONSE_TIMEOUT
@@ -277,61 +278,35 @@ class ResumatClient:
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                raise TimeoutError("Timed out waiting for the heating write reply")
-            timeout = min(
-                WRITE_ACK_IDLE_TIMEOUT if received else remaining,
-                remaining,
-            )
+                raise TimeoutError("Timed out waiting for the heating write ACK")
             try:
-                chunk = await asyncio.wait_for(self._reader.read(512), timeout)
+                chunk = await asyncio.wait_for(
+                    self._reader.read(512),
+                    remaining,
+                )
             except asyncio.TimeoutError:
-                if received:
-                    break
                 raise TimeoutError(
-                    "Timed out waiting for the heating write reply"
+                    "Timed out waiting for the heating write ACK; "
+                    f"received {received.hex() or 'no bytes'}"
                 ) from None
             if not chunk:
-                raise OSError("Serial port closed while waiting for the write reply")
+                raise OSError("Serial port closed while waiting for the write ACK")
             received.extend(chunk)
             self.set_status("receiving")
 
-        _LOGGER.debug(
-            "Received heating write reply (%d bytes): %s",
-            len(received),
-            received.hex(),
-        )
-        response = bytearray()
-        index = 0
-        while index < len(received):
-            byte = received[index]
-            if (
-                byte == 0x10
-                and index + 1 < len(received)
-                and received[index + 1] == 0x10
-            ):
-                response.append(byte)
-                index += 2
-            else:
-                response.append(byte)
-                index += 1
-
-        if len(response) < 14:
-            raise ResumatProtocolError(
-                "Heating write reply did not contain the returned setpoint; "
-                f"received {len(response)} unescaped bytes: {response.hex() or 'none'}"
+            status = _decode_write_ack(received)
+            if status is None:
+                continue
+            if status != 0:
+                raise ResumatProtocolError(
+                    f"Controller rejected the heating target write with "
+                    f"status 0x{status:02x}; reply: {received.hex()}"
+                )
+            _LOGGER.debug(
+                "Heating target write acknowledged successfully: %s",
+                received.hex(),
             )
-
-        # Node-RED parses the float at absolute offset 10 for any short reply;
-        # write acknowledgements do not necessarily use the read-response type.
-        confirmed = struct.unpack_from("<f", response, 10)[0]
-        if not math.isfinite(confirmed) or not math.isclose(
-            confirmed, requested, rel_tol=0.0, abs_tol=0.01
-        ):
-            raise ResumatProtocolError(
-                f"Controller confirmed {confirmed:g} °C instead of "
-                f"{requested:g} °C; reply bytes: {response.hex()}"
-            )
-        return confirmed
+            return
 
     async def _async_receive(self, expected_length: int) -> bytes:
         """Wait for a read response with the requested data length."""
@@ -430,6 +405,48 @@ class ResumatClient:
             readings = decode_readings(data)
             self.set_status("idle")
             return readings
+
+
+def _decode_write_ack(received: bytes | bytearray) -> int | None:
+    """Decode a complete short write ACK and return its status byte."""
+    response = bytearray()
+    index = 0
+    while index < len(received):
+        byte = received[index]
+        if (
+            byte == 0x10
+            and index + 1 < len(received)
+            and received[index + 1] == 0x10
+        ):
+            response.append(byte)
+            index += 2
+        else:
+            response.append(byte)
+            index += 1
+
+    start = response.find(_WRITE_RESPONSE_HEADER)
+    if start < 0:
+        if len(response) >= _WRITE_ACK_LENGTH:
+            raise ResumatProtocolError(
+                "Heating write reply did not contain a 0x0011 ACK header; "
+                f"reply: {response.hex()}"
+            )
+        return None
+
+    if len(response) - start < _WRITE_ACK_LENGTH:
+        return None
+
+    ack = response[start : start + _WRITE_ACK_LENGTH]
+    if ack[6:8] != _READ_MARKER or ack[10] != 0xFF:
+        raise ResumatProtocolError(f"Malformed heating write ACK: {ack.hex()}")
+
+    status = ack[5]
+    checksum = int.from_bytes(ack[8:10], "big")
+    if crc16(ack[3:6]) != checksum:
+        raise ResumatProtocolError(
+            f"Heating write ACK has invalid CRC: {ack.hex()}"
+        )
+    return status
 
 
 def _float_at(data: bytes | bytearray, address: int) -> float | None:

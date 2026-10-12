@@ -58,8 +58,9 @@ clear.
 The current heating target is exposed as a temperature sensor. The slider lets
 you set it from 18 °C to 30 °C in 0.5 °C steps. The integration uses the
 controller's `0x0113` command with a little-endian float and CRC-16/BUYPASS.
-It only reports a successful change after the controller's short serial reply
-contains the requested target value; missing or mismatched replies are errors.
+It only reports a successful write after a valid, status-zero `0x0011` ACK
+with a correct CRC. Afterward it polls the controller again so the sensor
+reflects the target actually stored by the heat pump.
 
 For detailed protocol diagnostics, enable debug logging for
 `custom_components.waterkotte_resuemat` in Home Assistant's logger. The log

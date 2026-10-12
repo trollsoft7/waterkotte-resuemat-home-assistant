@@ -80,18 +80,21 @@ DESCRIPTIONS = (
         translation_key="compressor_operating_hours",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.HOURS,
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     ResumatSensorDescription(
         key="heating_operating_hours",
         translation_key="heating_operating_hours",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.HOURS,
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     ResumatSensorDescription(
         key="hot_water_operating_hours",
         translation_key="hot_water_operating_hours",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.HOURS,
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     ResumatSensorDescription(
         key="heating_start_temperature",

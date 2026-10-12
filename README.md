@@ -49,7 +49,8 @@ operation, and a diagnostic serial communication sensor. The diagnostic
 sensor reports states such as connecting, waking, sending a read or write,
 waiting for a response or confirmation, receiving, parsing, idle, and error.
 Its attributes show the selected serial port and the latest communication
-error.
+error. Compressor, heating, and hot-water operating hours are grouped under
+Home Assistant's diagnostic entities.
 Heating and hot-water operating states display localized active/off labels;
 their enablement sensors report active when the controller's disable flag is
 clear.
